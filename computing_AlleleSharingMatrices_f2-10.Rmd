@@ -1,0 +1,531 @@
+---
+title: "Compute_alleleSharingMatrices"
+author: "Isabel Alves"
+date: "6/17/2020"
+output: html_document
+---
+
+## Description of the report
+
+This report explains all the steps required to compute allele sharing mac2-10 from Elisabeth scripts. Allele sharing was firstly computed between individuals from Brittany and Pays de la Loire. (This may or may not be extended to all the regions). 
+
+In order to reduce to the max the effect of physical linkage on the results I took two approaches:
+1) prunned sites based on linkage disequilibrium as implemented in plink: --indep-pairwise 50 5 0.5
+2) thin sites based on the physical distance using the tool created by Pierre Lindenbaum: https://gitlab.univ-nantes.fr/pierre.lindenbaum/bcfprune
+
+For the two approaches the preprocessing is different. Steps are explained below.
+
+Scripts are found in: /sandbox/shares/mages/WGS_PREGO_Finistere_GAZEL/elisabeth_argon/scripts
+Data is (prunning approach): /sandbox/shares/mages/WGS_PREGO_Finistere_GAZEL/isabel/plink/plinkFiles/20180323.FRENCHWGS.REF0002.allCHROM.*
+Data is (thinning approach): /sandbox/shares/mages/WGS_PREGO_Finistere_GAZEL/isabel/vcfs_no_filters/FRwgs.allCHROM.snps.hwe.maxmiss90.vcf.gz
+
+Data is already in plink format but included all the 856 individuals. Therefore, one needs to keep only individuals from Brittany and Pays de la Loire. To do so I used the table with the region and department of each sample locally stored in: /home/ialves/Dropbox/instDuThorax/samples/all_samples_PrepToMergeWMathieson2015
+
+## Preprocessing
+#### Preprocessing for prunning approach (input plink)
+
+```{bash eval=FALSE}
+#loading VCFtools
+module load R/3.3.3
+module load vcftools/0.1.15
+module load plink/1.90
+
+#here vcf is actually the bed/bim/fam prefix
+vcf="20180323.FRENCHWGS.REF0002.allCHROM.bis"
+echo ""
+echo "The VCF file used is : $vcf"
+echo ""
+
+dir="/sandbox/shares/mages/WGS_PREGO_Finistere_GAZEL/isabel/plink/plinkFiles"
+echo ""
+echo "The working directory is : $dir"
+echo ""
+
+chr=22
+echo ""
+echo "The number of chromosomes in the vcf is : $chr"
+echo ""
+
+if [ ! -d "${dir}/fTwo.2" ]; 
+        then
+                mkdir ${dir}/fTwo.2
+fi
+
+#name subset files
+outPrefix="WESTfrance"
+
+#locally 
+cd /home/ialves/Dropbox/instDuThorax/samples/all_samples_PrepToMergeWMathieson2015
+#select individuals from the sampleID_withCohort.txt (location above)
+cat sampleID_withCohort.txt | grep BRETAGNE > to_extract_f2G_BRET.tmp.txt
+cat sampleID_withCohort.txt | grep PAYS-DE-LA-LOIRE >> to_extract_f2G_BRET.tmp.txt
+cat to_extract_f2G_BRET.tmp.txt | awk '{print $1}' | sed 's/_/ /g' > to_extract_f2G_West.tmp.txt
+#this file was copied into the ${dir}/fTwo.2
+
+#extract individuals
+plink --noweb --bfile ${dir}/$vcf --keep ${dir}/fTwo.2/to_extract_f2G_West.tmp.txt --keep-allele-order --make-bed --out ${dir}/fTwo.2/${outPrefix}
+
+#this verion individually computes mac 1 to 10 using all the individuals
+for i in {2..10}
+do
+        plink --bfile ${dir}/fTwo.2/${outPrefix} --mac $i --max-mac $i --keep-allele-order --make-bed --out $dir/fTwo.2/${outPrefix}.mac$i.G
+        plink --bfile ${dir}/fTwo.2/${outPrefix}.mac$i.G --indep-pairwise 50 5 0.5 --out $dir/fTwo.2/${outPrefix}.mac$i.G
+        plink --bfile $dir/fTwo.2/${outPrefix}.mac$i.G --extract $dir/fTwo.2/${outPrefix}.mac$i.G.prune.in --keep-allele-order --make-bed --out $dir/fTwo.2/${outPrefix}.mac$i.G.pruned
+done
+
+
+#this verion computes MAC 3 to 10 using all the individuals (mac3to10G)
+plink --bfile ${dir}/fTwo.2/${outPrefix} --mac 3 --max-mac 10 --keep-allele-order --make-bed --out $dir/fTwo.2/${outPrefix}.mac3to10G
+plink --bfile ${dir}/fTwo.2/${outPrefix}.mac3to10G --indep-pairwise 50 5 0.5 --out $dir/fTwo.2/${outPrefix}.mac3to10G
+plink --bfile $dir/fTwo.2/${outPrefix}.mac3to10G --extract $dir/fTwo.2/${outPrefix}.mac3to10G.prune.in --keep-allele-order --make-bed --out $dir/fTwo.2/${outPrefix}.mac3to10G.pruned
+
+#reconvert to vcf to extract the GT tables
+for file in $dir/fTwo.2/$outPrefix.*.pruned.bed; do 
+tag=`echo $file | sed 's/\(.*\).bed/\1/'`;
+echo "$tag";
+echo "";
+plink --bfile $tag --recode vcf --real-ref-alleles --out $tag
+vcftools --vcf $tag.vcf --extract-FORMAT-info GT --out $tag
+sed -e 's/0\/0/0/g' $tag.GT.FORMAT | sed -e 's/0\/1/1/g' | sed -e 's/1\/0/1/g' | sed -e 's/1\/1/2/g' | sed -e 's/.\/./-1/g' > $tag.recode.GT.FORMAT
+done
+
+#----------- end of preprocessing using the prunning approach
+```
+
+#### Preprocessing for thinning approach (input vcf)
+
+```{bash eval=FALSE}
+
+#loading VCFtools
+module load R/3.3.3
+module load vcftools/0.1.15
+module load plink/1.90
+module load bcftools 
+
+#here vcf is actually the bed/bim/fam prefix
+vcf="FRwgs.allCHROM.snps.hwe.maxmiss90.vcf.gz"
+echo ""
+echo "The VCF file used is : $vcf"
+echo ""
+
+dir="/sandbox/shares/mages/WGS_PREGO_Finistere_GAZEL/isabel/vcfs_no_filters"
+echo ""
+echo "The working directory is : $dir"
+echo ""
+
+chr=22
+echo ""
+echo "The number of chromosomes in the vcf is : $chr"
+echo ""
+
+if [ ! -d "${dir}/fTwo.2" ]; 
+        then
+                mkdir ${dir}/fTwo.2
+fi
+
+cd ${dir}/fTwo.2
+echo "Copying file with individuals' IDs..."
+cp /sandbox/shares/mages/WGS_PREGO_Finistere_GAZEL/isabel/plink/plinkFiles/fTwo.2/to_extract_f2G_West.tmp.txt . 
+
+#change to_extract_f2G_West.tmp.txt such that B00GWGS PREGO passes to B00GWGS_PREGO
+cat to_extract_f2G_West.tmp.txt | sed 's/ /_/g' > to_extract_f2G_West.tmp.tmp.txt
+
+#name subset files
+outPrefix="WESTfrance"
+export LD_LIBRARY_PATH=/sandbox/apps/bioinfo/binaries/htslib/0.0.0/htslib
+cd $HOME/bcfprune
+bcftools view -S ${dir}/fTwo.2/to_extract_f2G_West.tmp.tmp.txt -O u ${dir}/$vcf | bcftools view --min-ac 2 --max-ac 2 -O u | ./bcfprune -O v -d 5000 -o ${dir}/fTwo.2/$outPrefix.mac2.thinned.vcf
+
+bcftools view -S  ${dir}/fTwo.2/to_extract_f2G_West.tmp.tmp.txt --min-ac 3 --max-ac 10 -O b  ${dir}/$vcf | ./bcfprune -O z -d 5000 -o ${dir}/fTwo.2/$outPrefix.mac3to10.thinned
+
+#reconvert to vcf to extract the GT tables
+cd /sandbox/shares/mages/WGS_PREGO_Finistere_GAZEL/isabel/vcfs_no_filters/fTwo.2
+for file in $dir/fTwo.2/$outPrefix.*.thinned.vcf; do 
+tag=`echo $file | sed 's/\(.*\).vcf/\1/'`;
+echo "$tag";
+echo "";
+#vcftools --vcf $tag.vcf --extract-FORMAT-info GT --out $tag
+sed -e 's/0\/0/0/g' $tag.GT.FORMAT | sed -e 's/0\/1/1/g' | sed -e 's/1\/0/1/g' | sed -e 's/1\/1/2/g' |  sed -e 's/.\/./-1/g' > $tag.recode.GT.FORMAT
+done
+
+#checking if the headers have all the same individual order
+#mac classe
+macTag="mac3to10"
+errorVar=false
+for chr in `seq 1 22`; do
+my_string=`head -1 WESTfrance.chr$chr.$macTag.thinned.recode.GT.FORMAT`;
+if [[ $chr -eq 1 ]];
+then
+echo "Saving chr: $chr"
+my_array=`echo $my_string | cut -d$' ' -f3-622 | tr "\t" "\n"`
+nbfields=`head -1 WESTfrance.chr$chr.$macTag.thinned.recode.GT.FORMAT | wc -w`;
+echo $nbfields;
+else 
+otherArray=`echo $my_string | cut -d$' ' -f3-622 | tr "\t" "\n"`
+echo "Comparing arrays..."
+echo "Chr: $chr"
+echo ""
+COUNT=0
+while [ $COUNT -lt ${#my_array[@]} ]; 
+do
+if [[ "${my_array[$COUNT]}" != "${otherArray[$COUNT]}" ]]; 
+then
+echo "Sample order differ";
+errorVar=true
+fi
+((COUNT=COUNT+1))
+done
+fi
+done
+if [[ "$errorVar" == true ]]; then
+echo "Do not merge. headers do not correspond"
+else 
+for chr in `seq 1 22`; do
+if [[ $chr -eq 1 ]];
+then
+cat WESTfrance.chr$chr.$macTag.thinned.recode.GT.FORMAT > all_pop.$macTag.G.GT.FORMAT
+else
+sed 1d WESTfrance.chr$chr.$macTag.thinned.recode.GT.FORMAT >> all_pop.$macTag.G.GT.FORMAT
+fi
+done
+fi
+
+qlogin
+module load R
+Rscript /sandbox/shares/mages/WGS_PREGO_Finistere_GAZEL/elisabeth_argon/scripts/mac2_f2G.R ~/FR_WGS/vcfs_no_filters/fTwo.2 3
+
+#----------- end of preprocessing using the thinning approach
+```
+
+
+
+## Compute f2 and f3to10 matrices
+
+```{r, eval=FALSE}
+ 
+#install.packages(X, lib="/sandbox/users/alves-i/R/x86_64-pc-linux-gnu-library", dependencies = T)
+#function to convert coordinates in deg min sec to degrees
+dms2dec <- function(dms, separators = c("deg", "min", "sec")) {
+  # version 1.0 (25 Sep 3013)
+  # dms: a vector (or column) of latitude or longitude in degrees-minutes-seconds-hemisfere, e.g. 41° 34' 10.956" N (with or without spaces)
+  # separators: the characters that are separating degrees, minutes and seconds in dms
+  # dms <- myData$Long
+  # separators = c("deg", "min", "sec")
+  
+  dms <- as.character(dms)
+  dms <- gsub(pattern = " ", replacement = "", x = dms)
+  for (s in separators) dms <- gsub(pattern = s, replacement = "_splitHere_", x = dms)
+  
+  splits <- strsplit(dms, split = "_splitHere_")
+  n <- length(dms)
+  deg <- min <- sec <- hem <- vector("character", n)
+  
+  for (i in 1:n) {
+    deg[i] <- splits[[i]][1]
+    min[i] <- splits[[i]][2]
+    sec[i] <- splits[[i]][3]
+    hem[i] <- splits[[i]][4]
+  }
+  
+  dec <- as.numeric(deg) + (as.numeric(min) / 60) + (as.numeric(sec) / 3600)
+  sign <- ifelse (hem %in% c("N", "E"), 1, -1)
+  dec <- sign * dec
+  return(dec)
+}  # end dms2dec function 
+
+
+################
+## Locally
+library(gplots)
+library(dendextend)
+library(colorspace)
+library(pracma)
+library(wesanderson)
+library(circlize)
+if (!requireNamespace("BiocManager", quietly = TRUE))
+    install.packages("BiocManager")
+#BiocManager::install(c("ComplexHeatmap"))
+library(ComplexHeatmap)
+library(rgdal)
+library(rgeos)
+library(sf)
+library(plotrix)
+library(broom)
+library(ggplot2)
+library(scatterpie)
+
+#variables
+wrkDir <- "/home/ialves/Dropbox/instDuThorax/f2/alleleSharing_matrices_June2020"
+setwd(wrkDir)
+outputName <- "WESTfrance"
+macSufix <- "mac3to10"
+kmax <- 10
+maxSharing <- 200
+colorsClusters <- c("navy", "hotpink4", "springgreen3", "lightpink1", "mediumorchid3", "goldenrod1", "lightsteelblue3", "turquoise3", "tan2", "springgreen4")
+
+#retrieving region and department labels 
+dirSamples <- "/home/ialves/Dropbox/instDuThorax/samples/all_samples_PrepToMergeWMathieson2015"
+fileName <- "sampleID_withCohort.txt"
+tbl_samples <- read.table(paste0(dirSamples, "/", fileName), header = F)
+dim(tbl_samples)
+
+#opening the allele sharing matrix ind x ind
+Doub = as.matrix(read.table(paste0(wrkDir, "/ind_", macSufix,".G_share.txt"), check.names=F), header=T)
+
+#subsetting the table containing sample's origin INFORMATION
+tbl_samples <- tbl_samples[match(colnames(Doub), as.character(tbl_samples[,1])),]
+dim(tbl_samples)
+DepTmp <- unique(as.character(tbl_samples[,3]))
+Dep <- c("FINISTERE", "COTES-DARMOR", "MORBIHAN", "ILLE-ET-VILAINE", "LOIRE-ATLANTIQUE",
+         "MAYENNE", "MAINE-ET-LOIRE", "SARTHE", "VENDEE")
+
+#painting the departements to plot in the heatmap
+dep_col_vector <- sapply(Dep, function(x) {
+  if(x == "LOIRE-ATLANTIQUE"){
+    col_tmp="#d1e5f0"
+    } else if(x=="MAINE-ET-LOIRE")
+      { col_tmp="#4393c3"} 
+  else if(x=="VENDEE") 
+    {col_tmp="#053061"} 
+  else if(x=="MORBIHAN")
+    {col_tmp="#d6604d"} 
+  else if (x=="FINISTERE")
+    {col_tmp="#67001f"} 
+  else if(x=="MAYENNE")
+    {col_tmp="#92c5de"} 
+  else if(x=="SARTHE")
+    {col_tmp="#2166ac"} 
+  else if(x=="ILLE-ET-VILAINE")
+    {col_tmp="#f4a582"} 
+  else if(x=="COTES-DARMOR")
+    {col_tmp="#b2182b"}; 
+  return(col_tmp)})
+
+#coloring the ind according to their departement of origin
+indCol <- rep("",nrow(tbl_samples))
+for(d in 1:length(dep_col_vector)){
+  print(paste0("Coloring ", Dep[d]))
+  indCol[which(as.character(tbl_samples[,3]) == Dep[d])] <- dep_col_vector[d]
+}
+tbl_samples <- cbind(tbl_samples,indCol)
+
+hr <- hclust(as.dist(1-cor(t(Doub), method = "pearson")), method="complete")
+hc <- hclust(as.dist(1-cor(Doub, method = "pearson")), method="complete")
+
+# Dendrogram
+dendr <- as.dendrogram(hr)
+dendc <- as.dendrogram(hc)
+# mac2_colorsList <- list(ktwo=c(2,1), kthree=c(2,1,3), kfour=c(4,2,1,3), kfive=c(4,5,2,1,3), ksix=c(4,5,2,1,3,6),
+#                    kseven=c(4,5,2,7,1,3,6), keight=c(4,5,2,7,1,3,6,8), knine=c(4,5,2,7,1,3,6,8,9), kten=c(4,10,5,2,7,1,3,6,8,9))
+mac3_colorsList <- list(ktwo=c(1,2), kthree=c(1,3,2), kfour=c(1,3,2,4), kfive=c(1,3,2,5,4), ksix=c(1,3,2,5,4,6),
+                   kseven=c(1,7,3,2,5,4,6), keight=c(1,7,3,2,5,4,6,8), knine=c(1,7,3,2,5,9,4,6,8), kten=c(1,7,3,2,10,5,9,4,6,8))
+colorsList <- mac3_colorsList
+COUNT_k <- 1
+COUNT_k <- COUNT_k+1
+#for(kvalue in 2:kmax) {
+
+    kvalue <- 10
+    
+    ######
+    ## Paiting the clusters
+    ## Note that kmax MUST not go over 10. Otherwise there will be an error. No new color is assigned. 
+    ######
+    dendr <- color_branches(dendr, k=kvalue, col = colorsClusters[colorsList[[COUNT_k]]])
+    dendc <- color_branches(dendc, k=kvalue, col = colorsClusters[colorsList[[COUNT_k]]])
+    
+    ##-----------------
+    
+    #color the heatmap by providing extreme and middle colors for the gradient
+    #colHeatmap <- colorRamp2(c(0,10,30), c("#3B9AB2", "#EBCC2A", "#F21A00")) #mac2
+    colHeatmap <- colorRamp2(c(80,110,140), c("#3B9AB2", "#EBCC2A", "#F21A00"))
+  
+      #colHeatmap <- colorRamp2(quantile(Doub,probs = c(0.30,0.6,0.90)), c("#3B9AB2", "#EBCC2A", "#F21A00"))
+  
+    #creating individual matrix colouring individuals according to their department of origin
+    individualOriginMatrix <- c()
+    for(i in 1:15){ #the matrix has 15 rows just to make it big enough to be properly seen in the plot
+      individualOriginMatrix <- rbind(individualOriginMatrix,rbind(as.character(tbl_samples[,3])))
+    }
+    
+    ########################
+    ##
+    ## Plotting heatmap
+    ##
+    #######################
+    png(file=paste0(wrkDir, "/", outputName, "_", macSufix,"_k",kvalue,"_heatmap_XXX.png"), height = 10, width = 12, units = 'in' , res = 300)
+    fTwo=Heatmap(Doub, name = paste0(macSufix ," sharing"), cluster_rows=dendr, cluster_columns = dendc, show_row_names = FALSE, show_column_names = FALSE, col=colHeatmap) #
+    colInd=Heatmap(individualOriginMatrix, name = "Dep", col = dep_col_vector)
+    ht_list = fTwo %v% colInd
+    draw(ht_list)
+    dev.off()
+    ###----------------
+    
+    #creating table with indID, cluster, Departement
+    v_cluster_assign <- cutree(hr, k=kvalue)
+    clusters_and_dep <- cbind(as.matrix(v_cluster_assign), as.character(tbl_samples$V3[match(names(v_cluster_assign),tbl_samples$V1)]))
+    colnames(clusters_and_dep) <- c("Cluster", "Departement")
+    
+    ########################
+    ##
+    ## Preparing the barplot
+    ##
+    #######################
+  
+    #computing the prop of individuals from each departement assigned to each cluster: BARPLOT
+    m_indPerCluster <- matrix()
+    for(i in 1:kvalue){
+      indPerCluster <- rep(0, length(Dep))
+      names(indPerCluster) <- Dep
+      if(i == 1){
+        indPerCluster[match(names(table(clusters_and_dep[which(clusters_and_dep[,1] == i),2])), names(indPerCluster))] <- table(clusters_and_dep[which(clusters_and_dep[,1] == i),2])
+        m_indPerCluster <- indPerCluster
+      } else {
+        indPerCluster[match(names(table(clusters_and_dep[which(clusters_and_dep[,1] == i),2])), names(indPerCluster))] <- table(clusters_and_dep[which(clusters_and_dep[,1] == i),2])
+         m_indPerCluster <- rbind(m_indPerCluster, indPerCluster)
+      }
+    }
+    colnames(m_indPerCluster) 
+    rownames(m_indPerCluster) <- paste0("Cluster_", 1:kvalue)
+    
+    write.table(m_indPerCluster, file=paste0(wrkDir, "/", outputName, "_", macSufix,"_k",kvalue,"_table_cluster_", i, "XX.txt"), quote = F, col.names = T, row.names = T)
+    ########################
+    ##
+    ## Plotting the barplot
+    ##
+    #######################
+    png(file=paste0(wrkDir, "/", outputName, "_", macSufix,"_k",kvalue,"_barplot_XX.png"), height = 6, width = 6, units = 'in', res = 300)
+    barplot(t(m_indPerCluster/apply(m_indPerCluster,1,sum)), beside = F, col = dep_col_vector, 
+    names.arg=c(1:kvalue), ylab = "Prop. of assigned individuals")
+    dev.off()
+    ##----------------
+    
+    ################
+    ##
+    ## plotting maps
+    ##
+    ################
+    
+    #getting shapefile
+    pathToFile <- "/home/ialves/Dropbox/jobRelated_Isabel/MyPapers/Genetics_of_WESTERN_FRANCE/newVersion_june2020/maps"
+    crswgs84=CRS("+proj=longlat +ellps=WGS84 +datum=WGS84 +no_defs")
+    #reading shapefile
+    depNew=readOGR(dsn="/home/ialves/Dropbox/jobRelated_Isabel/MyPapers/Genetics_of_WESTERN_FRANCE/newVersion_june2020/maps", layer = "departements-20180101", verbose = F)
+    
+    departNames <- c("Loire-Atlantique", "Vendée", "Finistère", "Côtes-d'Armor", "Sarthe", "Mayenne", "Maine-et-Loire", "Ille-et-Vilaine", "Morbihan")
+    #keeping only the departement of western france
+    west <- depNew[match(departNames, depNew$nom),]
+    
+    #opening departement coordinates
+    tableCoord_FR_WGS <- read.table("/home/ialves/Dropbox/instDuThorax/samples/coordinates/departments_BRE_PL_tmp.txt", header = F)
+    frenchCoord_newLong <- dms2dec(as.character(tableCoord_FR_WGS$V2))
+    frenchCoord_newLat <- dms2dec(as.character(tableCoord_FR_WGS$V3))
+    
+    #creating the dataframe with propr of individuals from assgined to the different clusters. 
+    propCluster <- t(m_indPerCluster)/apply(t(m_indPerCluster), 1, sum)
+    propCluster <- cbind(propCluster, frenchCoord_newLong[match(as.character(tableCoord_FR_WGS[,1]), rownames(propCluster))],
+                         frenchCoord_newLat[match(as.character(tableCoord_FR_WGS[,1]), rownames(propCluster))])
+    colnames(propCluster) <- c(rownames(m_indPerCluster), "LONG", "LAT")
+  
+    #transf shapefile object into ggplot2 readable object
+    transf_obj <- tidy(west)
+    propCluster <- data.frame(propCluster)
+    propCluster$Department <- 1:nrow(propCluster)
+    #---------------
+    
+    #getting the sample sizes per department
+    sSizes <- apply(t(m_indPerCluster), 1, sum)/max(apply(t(m_indPerCluster), 1, sum))
+    propCluster$RelSampleSize <- sSizes
+    #---------------
+  
+    #coloring the map according the department and region
+    dep <- unique(transf_obj$id)
+    colr <- rep("lemonchiffon4", length(transf_obj$id))
+    colr[transf_obj$id == "62" | transf_obj$id == "30" | transf_obj$id == "71" | transf_obj$id == "80" | transf_obj$id == "81"] <- "khaki3"
+    #---------------
+    
+    
+    #coloring the clusters
+    clusterCol <- colorsClusters[colorsList[[COUNT_k]]]
+  
+    maplot <- ggplot() +
+      geom_polygon(data = transf_obj, aes( x = long, y = lat, group = group), fill=colr, color="grey90") +
+      xlim(-5.035377, 2.281141) + ylim(45.615531, 50.086662) +
+      geom_scatterpie(data = propCluster, cols = paste0("Cluster_", 1:kvalue), color=NA, alpha=1, aes(x=LONG, y=LAT, group=Department, r=0.2)) + scale_fill_manual(values=clusterCol[match(sort(as.character(1:kvalue)),unique(v_cluster_assign[order.dendrogram(dendr)]))]) + theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(), panel.background = element_blank(), axis.line = element_line(colour = "white"), axis.title.x=element_blank(), axis.text.x=element_blank(), axis.ticks.x=element_blank(), axis.title.y=element_blank(), axis.text.y=element_blank(), axis.ticks.y=element_blank())
+    
+    png(file=paste0(wrkDir, "/", outputName, "_", macSufix,"_k",kvalue,"_piecharts_XX.png"), height = 6, width = 9, units ="in", res = 300)
+    maplot
+    dev.off()
+  COUNT_k <- COUNT_k+1
+
+
+```
+## Merge mac2 and mac3to10 together in the same matrix
+
+```{r, eval=FALSE}
+
+#variables
+wrkDir <- "/home/ialves/Dropbox/instDuThorax/f2/alleleSharing_matrices_June2020"
+setwd(wrkDir)
+outputName <- "WESTfrance"
+kvalue <- 3
+#opening the allele sharing matrix ind x ind
+macTwo = as.matrix(read.table(paste0(wrkDir, "/ind_mac2.G_share.txt"), check.names=F), header=T)
+mac3to10 = as.matrix(read.table(paste0(wrkDir, "/ind_mac3to10.G_share.txt"), check.names=F), header=T)
+
+dim(macTwo)
+mergedM <- matrix(rep(0, prod(dim(macTwo)),), ncol=dim(macTwo)[1])
+mergedM[upper.tri(mergedM)] <- matrix(macTwo, ncol = dim(macTwo)[1])[upper.tri(matrix(macTwo, ncol = dim(macTwo)[1]))]
+mergedM[lower.tri(mergedM)] <- matrix(mac3to10, ncol = dim(macTwo)[1])[lower.tri(matrix(mac3to10, ncol = dim(macTwo)[1]))]
+
+#do clustering 
+hr <- hclust(as.dist(1-cor(t(macTwo), method="pearson")), method="complete")
+hc <- hclust(as.dist(1-cor(mac3to10, method="pearson")), method="complete")
+
+# Dendrogram
+dendr <- as.dendrogram(hr)
+dendc <- as.dendrogram(hc)
+
+######
+## Paiting the clusters
+## Note that kmax MUST not go over 10. Otherwise there will be an error. No new color is assigned. 
+######
+if(kvalue <= 5) {
+  dendr <- color_branches(dendr, k=kvalue, col = wes_palette("BottleRocket2", n = kvalue))
+  dendc <- color_branches(dendc, k=kvalue, col = wes_palette("BottleRocket2", n = kvalue))
+
+} else if(kvalue > 5) {
+  dendr <- color_branches(dendr, k=kvalue, col = c(wes_palette("BottleRocket2", n = 5), wes_palette("Darjeeling1", n = kvalue-5)))
+  dendc <- color_branches(dendc, k=kvalue, col = c(wes_palette("BottleRocket2", n = 5), wes_palette("Darjeeling1", n = kvalue-5)))
+
+}
+##-----------------
+
+#color the heatmap by providing extreme and middle colors for the gradient
+colHeatmap <- colorRamp2(quantile(macTwo, probs = c(0.30,0.60,0.90)), c("#3B9AB2", "#EBCC2A", "#F21A00"))
+#colHeatmap <- colorRamp2(quantile(Doub,probs = c(0.30,0.6,0.90)), c("#3B9AB2", "#EBCC2A", "#F21A00"))
+
+# #creating individual matrix colouring individuals according to their department of origin
+# individualOriginMatrix <- c()
+# for(i in 1:15){ #the matrix has 15 rows just to make it big enough to be properly seen in the plot
+#   individualOriginMatrix <- rbind(individualOriginMatrix,rbind(as.character(tbl_samples[,3])))
+# }
+  
+  ########################
+  ##
+  ## Plotting heatmap
+  ##
+  #######################
+  # png(file=paste0(wrkDir, "/", outputName, "_", macSufix,"_k",kvalue,"_heatmap_1.png"), height = 10, width = 12, units = 'in' , res = 300)
+  # fTwo=Heatmap(Doub, name = paste0(macSufix ," sharing"), cluster_rows=dendr, cluster_columns = dendc, show_row_names = FALSE, show_column_names = FALSE, col=colHeatmap) #
+  # colInd=Heatmap(individualOriginMatrix, name = "Dep", col = dep_col_vector)
+  # ht_list = fTwo %v% colInd
+  # draw(ht_list)
+  # dev.off()
+  
+Heatmap(log10(mergedM), name = paste0(macSufix ,"sharing"), cluster_rows=dendr, cluster_columns = dendc, show_row_names = FALSE, show_column_names = FALSE, col=colHeatmap) 
+decorate_heatmap_body("mac2sharing", {
+  grid.lines(c(0, 1), c(1, 0), gp = gpar(lty = 1, lwd = 2))
+})
+
+  
+```

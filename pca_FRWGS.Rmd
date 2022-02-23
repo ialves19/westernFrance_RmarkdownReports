@@ -1,0 +1,205 @@
+---
+title: "PCA_WGS"
+author: "Isabel Alves"
+date: "11/18/2019"
+output: html_document
+---
+
+## Brief description
+This reports describes how to obtain a PCA from the vcf files in the path: 
+/sandbox/users/alves-i/FR_WGS/vcf_ancestral
+
+The idea is to generate a PCA with common (MAF > .10) and rare variants (0.01<MAF<0.10). The PCAs contain all the individuals belonging to the following regions:
+
++ GRAND EST
++ NORMANDIE
++ CENTRE 
++ BRETAGNE
++ HAUTS DE FRANCE
++ PAYS-DE-LA-LOIRE
++ NOUVELLE-AQUITAINE
+
+To do so I used the list of individuals with population tag in the file: 
+
+/home/ialves/Dropbox/instDuThorax/samples/all_samples_PrepToMergeWMathieson2015/overlapSamples_pops.txt
+
+and removed all the individuals identified as: OTHERS
+
+```{bash eval = FALSE}
+grep -v OTHERS overlapSamples_pops.txt > samples_to_keep.pca.txt
+
+cat WGS.evec | sed 1d | awk '{print $1}' | while read SAMPLE; do newSamNames=`echo $SAMPLE | sed 's/:/_/g'`; regions=`grep "$newSamNames" /home/ialves/Dropbox/instDuThorax/samples/all_samples_PrepToMergeWMathieson2015/sampleID_withCohort.txt | awk '{print $2}'`; grep "$SAMPLE" WGS.evec | sed "s/???/$regions/g" >> WGS.regions.evec; done
+
+```
+
+
+
+Used this file to subset individuals from the vcf files indicated above. 
+
+The script used to process vcf files in terms of individual sampling and prunning can be found here: 
+
+/sandbox/users/alves-i/plink_compute_pca.bash
+
+the other used to merge chromosome-specific vcf and run smartpca can be found here:
+
+/sandbox/users/alves-i/plink_merging_files.bash
+
+
+To plot PCA I used the following R code: 
+
+```{r, echo=FALSE}
+require("spam")
+require("MASS")
+require("fields")
+
+##################
+##
+## Functions
+##
+##################
+##########computes the HDP for different values defined in CI_prob
+computeLevels<-function(dens, prob) {
+  dx <- diff(dens$x[1:2])
+  dy <- diff(dens$y[1:2])
+  sz <- sort(dens$z)
+  c1 <- cumsum(sz) * dx * dy
+  levels <- sapply(prob, function(x) {
+    approx(c1, sz, xout = 1 - x)$y
+  })
+  return(levels)
+}
+###################################
+######Computes the % of variance explained by each axis
+
+getttingPropVar<-function(x) {
+  
+  vector.propVar<-as.vector(x^2 / sum(x^2))
+  return(vector.propVar);
+  
+}
+###################################
+######subsetting the matrix from the princomp analysis
+
+gettingLimts<-function(pc1Vector, pc2Vector, nb.sim) {
+  
+  
+  limits<-c(min(pc1Vector[1:nb.sim])-0.01, max(pc1Vector[1:nb.sim])+0.01, min(pc2Vector[1:nb.sim])-0.01,
+            max(pc2Vector[1:nb.sim])+0.01)
+  
+  return(limits);
+  
+}
+
+###################################
+######subsetting the matrix from the princomp analysis
+
+subsetting<-function(pc1Vector, pc2Vector) {
+  
+  d<-as.matrix(cbind(pc1Vector,pc2Vector), ncol=2)
+  
+  return(d);
+}
+
+############-------------- END OF FUNCTIONS
+####-------------
+##------
+
+
+#####################################
+##
+##              MAIN
+##
+#####################################
+
+folderName <- "/home/ialves/Dropbox/instDuThorax/pca/2019-11-26"
+
+pca_loads <- read.table(paste0(folderName, "/WGS.evec"), header = F, sep = "", skip = 1)
+colnames(pca_loads) <- c("Sample_ID", paste("PC", 1:10, sep = "_"), "Region")
+
+############
+##
+## individual labels
+##
+############
+tmp_indLabels_PCA <- pca_loads[,1]
+# #transform ind names in pca results into a format compatible with the file "labels_indvs_to_keep_overPCA.txt"
+indLabels_PCA <- gsub(":", "_", tmp_indLabels_PCA)
+#open table with population info
+openNames <- read.table(file="/home/ialves/Dropbox/instDuThorax/samples/all_samples_PrepToMergeWMathieson2015/sampleID_withCohort.txt", header = F)
+length(indLabels_PCA)
+
+#remove individuals without region label
+unknownIDs <- as.character(openNames[which(openNames[,2] == "UNKNOWN"),1])
+index_to_rm <- match(unknownIDs, indLabels_PCA)
+if (sum(!is.na(index_to_rm)) != 0) {
+
+  indLabels_PCA <- indLabels_PCA[-match(unknownIDs, indLabels_PCA)]
+  pca_loads <- pca_loads[-index_to_rm,]
+}
+
+if (length(which(openNames[,2] == "UNKNOWN") > 0) > 0) {
+  openNames <- openNames[-which(openNames[,2] == "UNKNOWN"),]
+}
+
+
+if (length(indLabels_PCA) != nrow(openNames)) {
+  print("Number of initial samples differ from those in the PCA")
+  interNames_pca_geoTbl <- intersect(indLabels_PCA,openNames[,1])
+  openNames <- openNames[match(interNames_pca_geoTbl,openNames[,1]),]
+  indLabels_PCA <- indLabels_PCA[match(interNames_pca_geoTbl,indLabels_PCA)]
+  pca_loads <- pca_loads[match(interNames_pca_geoTbl,indLabels_PCA),]
+}
+
+
+
+############
+##
+## Opening eigenvalues
+##
+############
+
+eigenVal <- scan(file=paste0(folderName, "/WGS.eval"), what = as.numeric())[-1]
+
+############
+##
+## Set colors
+##
+############
+allPops <- c("BRETAGNE", "PAYS-DE-LA-LOIRE", "CENTRE", "BASSE-NORMANDIE.HAUTE-NORMANDIE", "LIMOUSIN.POITOU-CHARENTES", "NORD-PAS-DE-CALAIS.PICARDIE", "ALSACE.LORRAINE")
+acronyms <- c("Brittany", "Pays de la Loire", "Centre", "Normandie", "Nouvelle Aquitaine", "Hautes de France", "Grand Est")
+colors_reg <- c("lemonchiffon4", "khaki3", "#fee08b", "#abdda4", "orange3", "lightseagreen", "steelblue4")
+col_v <- rep(0, nrow(pca_loads))
+for (pop in 1:length(allPops)) {
+
+  print(paste("Coloring population: ", allPops[pop], sep = ""))
+  print(paste("nb of individual in the pop: ", length(which(openNames[,2] == allPops[pop])), sep = ""))
+  col_v[which(openNames[,2] == allPops[pop])] <- colors_reg[pop]
+}
+# for (reg in 1:length(allPops)) {
+#   pca_loads[pca_loads$Region %in% allPops[reg], "Color"] <- colors_reg[reg] 
+# }
+
+##############
+##
+## plotting pdf 
+##
+##############
+png(file=paste0(folderName, "/pca_maxmaf0.1_maf0.01_7regions_nov26.png"), height=3, width = 7,
+    units = 'in', res = 300)
+z <- layout(matrix(c(1,2,3), ncol = 3), widths=c(3,3,2))
+layout.show(z)
+par(mar=c(4,4,1,0))
+  plot(pca_loads[,2], pca_loads[,3], col=col_v, pch=19, xlab=paste0("PC1 (", round((eigenVal[1]/sum(eigenVal))*100, digits = 3), "%)"),
+       ylab = paste0("PC2 (", round((eigenVal[2]/sum(eigenVal))*100, digits = 3), "%)"))
+  plot(pca_loads[,3], pca_loads[,4], col=col_v, pch=19, xlab=paste0("PC2 (", round((eigenVal[2]/sum(eigenVal))*100, digits = 3), "%)"),
+       ylab = paste0("PC3 (", round((eigenVal[3]/sum(eigenVal))*100, digits = 3), "%)"))
+  plot(0,type='n',axes=FALSE,ann=FALSE, xlim=c(0,1), ylim=c(0,1))
+
+  # par(xpd=TRUE)
+legend(0, 1, legend = acronyms[1:7], fill=colors_reg[1:7], bty = "n", border = "white", cex = 0.8)
+# legend(-0.01, 0.20, legend = acronyms[3:4], fill=colors_reg[3:4], bty = "n")
+# legend(0.04, 0.20, legend = acronyms[5:6], fill=colors_reg[5:6], bty = "n")
+# legend(0.09, 0.20, legend = acronyms[7], fill=colors_reg[7], bty = "n")
+dev.off()
+
+```

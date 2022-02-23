@@ -1,0 +1,634 @@
+---
+title: "Matching PREGO and CNG samples"
+author: "Isabel Alves"
+date: "7/6/2020"
+output: html_document
+---
+
+## Brief description of the purpose of this report
+
+This report describes the steps taken to match samples from PREGO and used by Joanna to those sent for whole-genome sequencing to the CNG. The idea here is to find samples assigned to the three (18 or 78) clusters identified with fineSTRUCTURE (West Brittany, East Brittany and South Loire) by Joanna and use those samples to represent people from these three (18 or 78 regions??) regions. 
+
+
+### Get PREGO samples 
+The first step of this process was to obtain the PREGO samples present in the FR WGS dataset. To do so, I selected the samples that contain PREGO in the individuals' ID of merged dataset FR_MS_PS_POBI_HDGP, which is hosted in the BiRD cluster.
+
+File path: /sandbox/shares/mages/WGS_PREGO_Finistere_GAZEL/isabel/FR_MS_PS_POBI_HGDP/fstats
+File name: FR_MS_PS_POBI_HGDPMbu_Basq_Orc_Sar.commonSNPs.flipped.hwe.maf0.05.fam
+
+```{bash eval=FALSE}
+wrkDir="/sandbox/shares/mages/WGS_PREGO_Finistere_GAZEL/isabel/FR_MS_PS_POBI_HGDP/fstats"
+fileName="FR_MS_PS_POBI_HGDPMbu_Basq_Orc_Sar.commonSNPs.flipped.hwe.maf0.05.fam"
+
+cd $wrkDir/
+cat $fileName | grep PREGO > PREGO_samples.txt
+
+```
+
+The resulting file was then copied locally.
+
+The idea is to create a file with the WGSFR_ID, PREGO_ID, cluster_ID_k3, cluster_ID_k18, cluster_ID_k78
+```{bash eval=FALSE}
+
+#locally
+wrkDir="/home/ialves/Dropbox/instDuThorax/PREGO_FR-WGS"
+PREGOWGSfile="PREGO_samples.txt"
+clusterFile="ViveLesClusters.txt"
+correspFile="envoisCNG_2020-07-06_10h37.csv"
+outFile="match_FrWGS_PREGO_tmp.txt"
+
+cd $wrkDir
+
+cat $PREGOWGSfile | awk '{print $2}' | sed 's/.*:\(.*\)_.*/\1/g' | while read indID; do testID=`grep $indID $correspFile`; if [ ! -z "$testID" ]; then newTag=`grep $indID $correspFile | cut -d$',' -f2 | tr -d '"'`; isSample=`grep $newTag $clusterFile`; if [ ! -z "$isSample" ]; then paste -d$' ' <(echo "0:${indID}_PREGO") <(grep $newTag $clusterFile) >> $outFile; echo "Yes" >> yes_no_info_tmp.txt; else paste -d$' ' <(echo "0:${indID}_PREGO") <(echo ". . . . . . . . . .") >> $outFile; echo "No" >> yes_no_info_tmp.txt; fi; done
+
+paste -d$' ' $outFile yes_no_info_tmp.txt > match_FrWGS_PREGO.txt
+
+cat match_FrWGS_PREGO.txt | awk '{print $1}' | sed 's/.*:\(.*\)_.*/\1/g' | while read indID; do echo $indID; paste -d$' ' <(grep $indID match_FrWGS_PREGO.txt | awk '{print $1,$2,$3,$4,$5,$NF}') <(grep $indID ../samples/all_samples_PrepToMergeWMathieson2015/sampleID_withCohort.txt | awk '{print $2,$3}') >> FrWGSid_PREGOid_cluster1_cluster2_cluster3_Region_Dep.txt; done
+
+grep -v "BASSE-NORMANDIE.HAUTE-NORMANDIE" FrWGSid_PREGOid_cluster1_cluster2_cluster3_Region_Dep.txt > FrWGSid_PREGOid_cluster1_cluster2_cluster3_Region_WestDep.txt
+
+more FrWGSid_PREGOid_cluster1_cluster2_cluster3_Region_WestDep.txt | wc -l
+#351 - one sample is from Normandie
+
+grep Yes FrWGSid_PREGOid_cluster1_cluster2_cluster3_Region_WestDep.txt  | wc -l
+#190 PREGO individuals who are in the WGS dataset and clustered by fineSTRUCTURE
+
+grep Yes FrWGSid_PREGOid_cluster1_cluster2_cluster3_Region_WestDep.txt | sort -k3 -n | awk '$3 == "1"' | awk '{print $4}' | sort -k4 -n | uniq -c
+#     83 1
+#      4 12
+#     22 6
+#      5 8
+#      2 9
+#      1 NA
+
+grep Yes FrWGSid_PREGOid_cluster1_cluster2_cluster3_Region_WestDep.txt | sort -k3 -n | awk '$3 == "2"' | awk '{print $4}' | sort -k4 -n | uniq -c
+#    32 5
+#     6 6
+
+grep Yes FrWGSid_PREGOid_cluster1_cluster2_cluster3_Region_WestDep.txt | sort -k3 -n | awk '$3 == "3"' | awk '{print $4}' | sort -k4 -n | uniq -c
+#      6 22
+#      2 23
+#      9 26
+#      3 30
+#      5 33
+#      9 37
+#      1 39
+wrkDir=`pwd -P`
+
+#select 25 samples when there is more than that
+nbSamples=25
+#cluster 1
+nbSamplesCluster=`grep Yes FrWGSid_PREGOid_cluster1_cluster2_cluster3_Region_WestDep.txt | sort -k3 -n | awk '$3 == "1"' | wc -l`; if [ $nbSamplesCluster -gt $nbSamples ]; then echo "Cluster 1 contains $nbSamplesCluster"; grep Yes FrWGSid_PREGOid_cluster1_cluster2_cluster3_Region_WestDep.txt | sort -k3 -n | awk '$3 == "1"' | shuf -n $nbSamples > cluster1_PREGOsamples.txt; else echo "Cluster 1 contains less than 25 samples. No resampling carried on"; fi
+
+#cluster 2
+nbSamplesCluster=`grep Yes FrWGSid_PREGOid_cluster1_cluster2_cluster3_Region_WestDep.txt | sort -k3 -n | awk '$3 == "2"' | wc -l`; if [ $nbSamplesCluster -gt $nbSamples ]; then echo "Cluster 2 contains $nbSamplesCluster"; grep Yes FrWGSid_PREGOid_cluster1_cluster2_cluster3_Region_WestDep.txt | sort -k3 -n | awk '$3 == "2"' | shuf -n $nbSamples > cluster2_PREGOsamples.txt; else echo "Cluster 2 contains less than 25 samples. No resampling carried on"; fi
+
+#cluster 3
+nbSamplesCluster=`grep Yes FrWGSid_PREGOid_cluster1_cluster2_cluster3_Region_WestDep.txt | sort -k3 -n | awk '$3 == "3"' | wc -l`; if [ $nbSamplesCluster -gt $nbSamples ]; then echo "Cluster 3 contains $nbSamplesCluster"; grep Yes FrWGSid_PREGOid_cluster1_cluster2_cluster3_Region_WestDep.txt | sort -k3 -n | awk '$3 == "3"' | shuf -n $nbSamples > cluster3_PREGOsamples.txt; else echo "Cluster 3 contains less than 25 samples. No resampling carried on"; fi
+
+
+```
+
+```{bash eval=FALSE}
+wrkDir="/sandbox/shares/mages/WGS_PREGO_Finistere_GAZEL/isabel/FR_MS_PS_POBI_HGDP"
+cd $wrkDir
+#select 25 samples when there is more than that
+nbSamples=25		
+cat samples_IDS/IDs_regions_Department_noPays_noBretagne.txt | awk '{print $2}' | sort | uniq -c | while read Line; do echo $Line | awk '{if($1 >= '"$nbSamples"') {print "Pop", $2 ,"has more than", '"$nbSamples"', "individuals. Resampling..."}}'; pop=`echo $Line | cut -d$' ' -f2`; ss=`echo $Line | cut -d$' ' -f1`; if [[ "$pop" != "-9" ]]; then if [ $ss -gt $nbSamples ]; then echo $pop; grep $' '$pop$' ' samples_IDS/IDs_regions_Department_noPays_noBretagne.txt | shuf -n $nbSamples | awk '{print $1}' >> samples_IDS/samples_ss${nbSamples}_noPREGO.txt; else echo "$pop has less than $nbSamples samples"; grep $' '$pop$' ' samples_IDS/IDs_regions_Department_noPays_noBretagne.txt | awk '{print $1}' >> samples_IDS/samples_ss${nbSamples}_noPREGO.txt; fi; fi; done
+  
+#change fam file to set to ignore those samples that are not in the downsampling set. 
+cd $wrkDir
+fileName="FR_MS_PS_POBI_HGDPMbu_Basq_Orc_Sar.commonSNPs.flipped.hwe.maf0.05"
+PREGOsamples="PREGO_FrWGS_match"
+sampleFile="samples_ss${nbSamples}_noPREGO.txt"
+
+cat $fileName.fam | while read Line; do sample=`echo $Line | awk '{print $2}'`; ds=`grep $sample samples_IDS/$sampleFile`; if [ ! -z "$ds" ]; then local=`grep $sample samples_IDS/IDs_regions_Department_noPays_noBretagne.txt | cut -d$' ' -f2`; paste -d$' ' <(echo $Line | awk '{print $1,$2,$3,$4,$5}') <(echo $local) >> $PREGOsamples/$fileName.fam; else ds=`grep $sample <(cat PREGO_FrWGS_match/cluster1_PREGOsamples.txt PREGO_FrWGS_match/cluster2_PREGOsamples.txt PREGO_FrWGS_match/cluster3_PREGOsamples.txt) | awk '{print $1}'`; if [ ! -z "$ds" ]; then for c in `seq 1 3`; do tmpGrep=`grep $sample $PREGOsamples/cluster${c}_PREGOsamples.txt |awk '{print $1}'`; echo "$tmpGrep"; if [ ! -z $tmpGrep ]; then local="cluster$c"; echo "$local"; break; fi; done; paste -d$' ' <(echo $Line | awk '{print $1,$2,$3,$4,$5}') <(echo $local) >> $PREGOsamples/$fileName.fam; else paste -d$' ' <(echo $Line | awk '{print $1,$2,$3,$4,$5}') <(echo "-9") >> $PREGOsamples/$fileName.fam; fi; fi; done; 
+
+cp $fileName.bed $fileName.bim $PREGOsamples/fstats
+
+cp $PREGOsamples/$fileName.fam $PREGOsamples/fstats
+
+cd $PREGOsamples/fstats
+mkdir f3
+mkdir f4
+
+cd
+fname="$PREGOsamples/fstats/$fileName"
+#subsetting the merged dataset
+(
+echo "genotypename:    $wrkDir/$fname.bed"   
+echo "snpname:         $wrkDir/$fname.bim"
+echo "indivname:       $wrkDir/$fname.fam"
+echo "outputformat:    EIGENSTRAT"
+echo "genotypeoutname: $wrkDir/$fname.geno"
+echo "snpoutname:      $wrkDir/$fname.snp"
+echo "indivoutname:    $wrkDir/$fname.ind"
+echo "familynames:     NO"
+) > $wrkDir/$PREGOsamples/fstats/convert.fstats.input
+
+$HOME/EIG-6.1.4/bin/convertf -p $wrkDir/$PREGOsamples/fstats/convert.fstats.input > $wrkDir/$PREGOsamples/fstats/convert.fstats.input.log
+
+```
+
+## f3 and D-statistics
+
+The file generated above contains a max of 25 individuals of each population in the FR_MS_PS_POBI_HGDP dataset. Locations with smaller sample sizes kept the original sample size. Instead of selecting 25 samples from Brittany and Pays-de-la-Loire we selected 25 individuals from each of the three clusters inferred by Joanna using fineSTRUCTURE. 
+
+Below is the list of sample sizes:
+
+Sample sizes | Region
+-------------|--------
+     25 | ALSACE.LORRAINE |
+     20 | Basque |
+     19 | BASSE-NORMANDIE.HAUTE-NORMANDIE |
+     25 | Belgium | 
+     25 | CENTRE |
+     25 | cluster1 | 
+     25 | cluster2 |
+     25 | cluster3 |
+     25 | Cornwall |
+     25 | Denmark |
+     25 | Dyfed |
+     25 | Finland |
+     25 | France |
+     25 | Germany |
+     25 | Gwynedd |
+     25 | Ireland |
+     25 | Italy |
+     25 | Kent |
+     25 | LIMOUSIN.POITOU-CHARENTES |
+     10 | Mbuti |
+     25 | NIreland |
+     25 | NORD-PAS-DE-CALAIS.PICARDIE |
+     25 | Norfolk |
+     25 | Norway |
+     13 | Orcadian |
+     25 | Poland |
+     25 | Sardinian |
+     25 | Spain |
+     25 | Sweden |
+     25 | UK |
+
+
+```{bash eval=FALSE}
+#####################
+###
+### COMPUTE f3
+###
+#####################
+
+#f3 outgroup Mbuti; FRpop, all_others
+
+wrkDir="/sandbox/shares/mages/WGS_PREGO_Finistere_GAZEL/isabel/FR_MS_PS_POBI_HGDP/PREGO_FrWGS_match/fstats"
+inputName="FR_MS_PS_POBI_HGDPMbu_Basq_Orc_Sar.commonSNPs.flipped.hwe.maf0.05"
+
+cd $wrkDir
+mkdir f3/inputF
+mkdir  f3/outputF
+
+#generating list of comparisons
+FRPOPS=( "cluster1" "cluster2" "cluster3" "ALSACE.LORRAINE" "NORD-PAS-DE-CALAIS.PICARDIE" "CENTRE" "LIMOUSIN.POITOU-CHARENTES" "BASSE-NORMANDIE.HAUTE-NORMANDIE" )
+outgroup="Mbuti"
+
+for pop in ${FRPOPS[@]}; do echo $pop; cat $inputName.fam | awk '{print $6}' | sort | uniq -c | awk '{print $2}' | while read compPop; do if [[ "$compPop" != "-9" ]]; then if [[ "$compPop" != "$pop" ]] && [[ "$compPop" != "$outgroup" ]]; then echo "$pop $compPop $outgroup" >> f3/inputF/list_f3outgroup_${outgroup}_${pop}.txt; fi;fi;done;done
+
+for pop in ${FRPOPS[@]}; do
+(
+echo "genotypename:    $wrkDir/$inputName.geno"
+echo "snpname:         $wrkDir/$inputName.snp"
+echo "indivname:       $wrkDir/$inputName.ind"
+echo "popfilename:     $wrkDir/f3/inputF/list_f3outgroup_${outgroup}_${pop}.txt"
+) > $wrkDir/f3/inputF/par.f3outgroup_${outgroup}_${pop}_sour2.par
+qsub -S /bin/bash -cwd $HOME/SCRIPTS_kamelot/running_f3Out.bash par.f3outgroup_${outgroup}_${pop}_sour2.par $wrkDir/f3
+done
+
+#f3 outgroup Mbuti; Ireland, all_others
+
+wrkDir="/sandbox/shares/mages/WGS_PREGO_Finistere_GAZEL/isabel/FR_MS_PS_POBI_HGDP/PREGO_FrWGS_match/fstats"
+cd $wrkDir
+inputName="FR_MS_PS_POBI_HGDPMbu_Basq_Orc_Sar.commonSNPs.flipped.hwe.maf0.05"
+
+#generating list of comparisons
+FRPOPS=( "Dyfed" )
+outgroup="Mbuti"
+
+for pop in ${FRPOPS[@]}; do echo $pop; cat $inputName.fam | awk '{print $6}' | sort | uniq -c | awk '{print $2}' | while read compPop; do if [[ "$compPop" != "-9" ]]; then if [[ "$compPop" != "$pop" ]] && [[ "$compPop" != "$outgroup" ]]; then echo "$pop $compPop $outgroup" >> f3/inputF/list_f3outgroup_${outgroup}_${pop}.txt; fi;fi;done;done
+
+cd 
+
+for pop in ${FRPOPS[@]}; do
+(
+echo "genotypename:    $wrkDir/$inputName.geno"
+echo "snpname:         $wrkDir/$inputName.snp"
+echo "indivname:       $wrkDir/$inputName.ind"
+echo "popfilename:     $wrkDir/f3/inputF/list_f3outgroup_${outgroup}_${pop}.txt"
+) > $wrkDir/f3/inputF/par.f3outgroup_${outgroup}_${pop}_sour2.par
+qsub -S /bin/bash -cwd $HOME/SCRIPTS_kamelot/running_f3Out.bash par.f3outgroup_${outgroup}_${pop}_sour2.par $wrkDir/f3
+done
+
+#f3 outgroup Mbuti; Basque, all_others
+
+wrkDir="/sandbox/shares/mages/WGS_PREGO_Finistere_GAZEL/isabel/FR_MS_PS_POBI_HGDP/PREGO_FrWGS_match/fstats"
+cd $wrkDir
+inputName="FR_MS_PS_POBI_HGDPMbu_Basq_Orc_Sar.commonSNPs.flipped.hwe.maf0.05"
+
+#generating list of comparisons
+FRPOPS=( "Basque" )
+outgroup="Mbuti"
+
+for pop in ${FRPOPS[@]}; do echo $pop; cat $inputName.fam | awk '{print $6}' | sort | uniq -c | awk '{print $2}' | while read compPop; do if [[ "$compPop" != "-9" ]]; then if [[ "$compPop" != "$pop" ]] && [[ "$compPop" != "$outgroup" ]]; then echo "$pop $compPop $outgroup" >> f3/inputF/list_f3outgroup_${outgroup}_${pop}.txt; fi;fi;done;done
+
+cd 
+
+for pop in ${FRPOPS[@]}; do
+(
+echo "genotypename:    $wrkDir/$inputName.geno"
+echo "snpname:         $wrkDir/$inputName.snp"
+echo "indivname:       $wrkDir/$inputName.ind"
+echo "popfilename:     $wrkDir/f3/inputF/list_f3outgroup_${outgroup}_${pop}.txt"
+) > $wrkDir/f3/inputF/par.f3outgroup_${outgroup}_${pop}_sour2.par
+qsub -S /bin/bash -cwd $HOME/SCRIPTS_kamelot/running_f3Out.bash par.f3outgroup_${outgroup}_${pop}_sour2.par $wrkDir/f3
+done
+
+#####################
+###
+### COMPUTE Dstats
+###
+#####################
+
+wrkDir="/sandbox/shares/mages/WGS_PREGO_Finistere_GAZEL/isabel/FR_MS_PS_POBI_HGDP/PREGO_FrWGS_match/fstats"
+cd $wrkDir 
+mkdir f4/inputF
+mkdir f4/outputF
+
+inputName="FR_MS_PS_POBI_HGDPMbu_Basq_Orc_Sar.commonSNPs.flipped.hwe.maf0.05"
+
+#generating list of comparisons
+FRPOPS=("NORD-PAS-DE-CALAIS.PICARDIE")
+outgroup="Mbuti"
+cpop="Dyfed"
+
+for pop in ${FRPOPS[@]}; do echo $pop; cat $inputName.fam | awk '{print $6}' | sort | uniq -c | awk '{print $2}' | while read compPop; do if [[ "$compPop" != "-9" ]]; then if [[ "$compPop" != "$pop" ]] && [[ "$compPop" != "$outgroup" ]] && [[ "$compPop" != "$cpop" ]] ; then echo "$outgroup $pop $cpop $compPop" >> f4/inputF/list_f4testout_${outgroup}_${pop}_${cpop}.txt; fi;fi;done;done
+
+
+#generating par file 
+for pop in ${FRPOPS[@]}; do
+(
+echo "genotypename:    $wrkDir/$inputName.geno"
+echo "snpname:         $wrkDir/$inputName.snp"
+echo "indivname:       $wrkDir/$inputName.ind"
+echo "popfilename:     $wrkDir/f4/inputF/list_f4testout_${outgroup}_${pop}_${cpop}.txt"
+echo "printsd:  YES"
+) > $wrkDir/f4/inputF/par.f4testout_${outgroup}_${pop}_${cpop}_sour2.par
+qsub -S /bin/bash -cwd $HOME/SCRIPTS_kamelot/running_f4.bash par.f4testout_${outgroup}_${pop}_${cpop}_sour2.par $wrkDir/f4
+done; 
+
+```
+
+## Plotting outgroup f3-statistics as it was done for the bell beakers.
+
+```{bash eval=FALSE}
+#locally
+wrkDir="/home/ialves/Dropbox/instDuThorax/PREGO_FR-WGS/fstats/f3/outputF"
+cd $wrkDir 
+
+for file in par.f3outgroup_Mbuti_*.log; do prefix=`echo $file | sed 's/\(.*\).par.log/\1/g'`; echo $prefix; grep "result:" $file | sort | uniq | sort -k5 -rn > ${prefix}_tmp.log; echo ""; done
+
+```
+
+```{r echo=TRUE}
+#####################################
+##
+## Plot heatmap with f3 statistics
+##
+####################################
+library("lattice")
+library("viridis") 
+wrkDir <- "/home/ialves/Dropbox/instDuThorax/PREGO_FR-WGS/fstats/f3/outputF"
+setwd(wrkDir)
+listFile=list.files(path = wrkDir, pattern = "_tmp.log", full.names = T)
+
+COUNT <- 1
+for(f in listFile) {
+  openFile <- read.table(f, header = F)
+  
+  if(COUNT==1) {
+
+    nameCol <- as.character(unique(openFile[,2]))
+    tble_f3 <- rbind(0,matrix(openFile[,5]))
+    rownames(tble_f3) <- c(nameCol,as.character(openFile[,3]))
+    
+  } else {
+    nameCol <- c(nameCol,as.character(unique(openFile[,2])))
+    tble_f3 <- cbind(tble_f3, openFile[match(rownames(tble_f3), openFile[,3]),5])
+  }
+  COUNT <- COUNT+1
+}
+tble_f3[is.na(tble_f3)] <- 0
+colnames(tble_f3) <- nameCol
+
+orderFR <- c("cluster2", "cluster1", "cluster3", "BASSE-NORMANDIE.HAUTE-NORMANDIE", "NORD-PAS-DE-CALAIS.PICARDIE", "ALSACE.LORRAINE", "CENTRE","LIMOUSIN.POITOU-CHARENTES")
+
+remaingOrder <- c("NIreland", "Ireland", "Dyfed", "Gwynedd","Cornwall","Orcadian", "Kent", "Norfolk", "UK", "Denmark", "Norway","Sweden", "Finland", "Belgium", "Germany", "Poland", "Italy", "Sardinian", "Basque","Spain")
+publishNameFR <- c("WBR", "EBP", "SLO","NORMANDIE", "HAUTS-DE-FRANCE", "GRAND-EST", "CENTRE", "NOUVELLE-AQUITAINE")
+allPops <- c(orderFR, remaingOrder)
+
+tble_f3 <- tble_f3[match(allPops, rownames(tble_f3)),match(orderFR, colnames(tble_f3))]
+tble_f3[which(tble_f3==0)] <- NA
+rownames(tble_f3) <- c(substr(publishNameFR, start=1, stop=3), substr(remaingOrder,start=1, stop=4))
+colnames(tble_f3) <- substr(publishNameFR, start=1, stop=3)
+coord_x <- 1:nrow(tble_f3)
+coord_y <- unlist(lapply(1:ncol(tble_f3), function(x) {rep(x,nrow(tble_f3))}))
+
+png(filename = paste0(wrkDir, "/heatmap_f3", Sys.Date(),".png"), width = 12, height = 4, units = 'in', res = 300)
+par(mar=c(1,1,1,5))
+levelplot(rbind(t(tble_f3[8:1,1:8]), tble_f3[9:nrow(tble_f3),8:1])*100, col.regions=rev(inferno(100)), scales=list(x=list(cex=1, rot=45), y=list(cex=1)), xlab="", ylab="",  aspect = 0.22, scales.margin="f3-Outgroup", panel = function(...){
+            panel.levelplot(...)
+            ltext(x =coord_x, y=coord_y, labels =  round(as.matrix(rbind(t(tble_f3[8:1,1:8]), tble_f3[9:nrow(tble_f3),8:1]))*100, digits = 2), #[which(!is.na(as.matrix(tble_f3)))]
+                  cex = 0.75, font = 2, col = "white") })
+#text(cex=1, x=x-0.25, y=-1.5, rownames(tble_f3), xpd=TRUE, srt=90)
+dev.off()
+
+
+
+
+#####################################
+##
+## Plotting D-stats
+## Lollipop plots
+##
+#####################################
+
+
+workDir <- "/home/ialves/Dropbox/instDuThorax/PREGO_FR-WGS/fstats/f4/outputF"
+setwd(workDir)
+fileNames <- list.files(workDir, pattern=paste0("*_sour2_tmp.log"), full.names=TRUE)
+
+for(file in fileNames) {
+  
+  #file <- fileNames[1]
+  popC <- unlist(strsplit(file, split = "_"))[4]
+  popB <- unlist(strsplit(file, split = "_"))[3]
+  frPOPs <- c("cluster2", "cluster1", "cluster3", "BASSE-NORMANDIE.HAUTE-NORMANDIE", "NORD-PAS-DE-CALAIS.PICARDIE", "ALSACE.LORRAINE", "CENTRE", "LIMOUSIN.POITOU-CHARENTES")
+  publishLabels <- c("WBR", "EBP", "SLO", "NOR", "HAU", "GRA", "CEN", "NOU")
+
+
+if(is.element(popC, frPOPs)) {
+  labelsToChange <- setdiff(frPOPs, popC)
+  publishLabelsToChange <- publishLabels[which(frPOPs != popC)]
+} else {
+  labelsToChange <- setdiff(frPOPs, popB)
+  publishLabelsToChange <- publishLabels[which(frPOPs != popB)]
+  
+}
+
+  open.f4 <- read.table(file, header = FALSE)
+  # if(popC == "BRETAGNE") {
+  #   indexOrder <- c(match(frenchPOPs[-which(frenchPOPs == popC)], open.f4$V5), (1:nrow(open.f4))[-match(frenchPOPs[-which(frenchPOPs == popC)], open.f4$V5)])
+  #   open.f4 <- open.f4[indexOrder,]
+  # }
+  outgroupLabel <- unique(open.f4$V2)
+  popLabel <- unique(open.f4$V3)
+  sd.f4 <- rep(NA,nrow(open.f4)+2)
+  sd.f4 <- open.f4$V7
+  z.score <- rep(NA,nrow(open.f4)+2)
+  z.score <- open.f4$V8
+  f4Stats <- rep(NA,nrow(open.f4)+2)
+  f4Stats <- open.f4$V6
+  fontype <- rep(1, nrow(open.f4))
+
+  #fontype[c(5,10)] <- NA
+  fontype[which(abs(open.f4$V8) > 3)] <- 4 #Z-score larger than 3
+  colorsGROUP <- "grey"
+  popLabels <- as.character(open.f4$V5)
+  popLabels[match(labelsToChange, popLabels)] <- publishLabelsToChange
+  colLabels <- rep("black", length(popLabels))
+  colLabels[match(publishLabelsToChange,popLabels)] <- "royalblue"
+  
+  #plot png
+  png(file=paste0(workDir, "/", outgroupLabel, "_", popLabel, "_", popC, "_", Sys.Date(), "_sour2.png"),  height = 7, width = 5,
+  units = 'in', res = 300)
+  par(mfrow=c(1,1),mar=c(4,2,2,5))
+  plot(x=f4Stats, y=nrow(open.f4):1,
+       xlim=range(-0.002, 0.0005),
+       pch=19, ylab="", main=popLabel, yaxt='n', col=colorsGROUP,
+       xlab="f4", cex.lab=2, axes = T, type = 'n', cex.axis=1.5) # xlim=c(-0.006,0.006)
+  
+  # hack: we draw arrows but with very special "arrowheads"
+  arrows(x0=f4Stats-sd.f4, y0=nrow(open.f4):1, 
+         x1=f4Stats+sd.f4, y1=nrow(open.f4):1,
+         length=0.05, angle=90, code=0, col = "grey48", lwd=2)
+  points(x=f4Stats, y=nrow(open.f4):1, col=colorsGROUP,
+         pch=19, cex=2)
+  abline(v=0, lty=2, lwd=2, col="grey75")
+  #abline(h=c(5,10), lty=1, lwd=1, col="black")
+  #axis(2, at=(nrow(open.f4)+2):1, labels = FALSE, las=1, cex.axis=0.75)
+  #mtext(text=orderPopsAll, side = 2, at = length(orderPopsAll):1, col=c(rep("brown4", 7), rep("grey75", length(orderPopsAll)-7)), las = 2, adj=1, line = 1)
+  axis(4, at=nrow(open.f4):1, labels = FALSE, las=1, cex.axis=0.75)
+  mtext(text=substr(popLabels, start=1, stop=4), at=nrow(open.f4):1, side = 4,
+        las = 2, adj = 0, line = 1, col=colLabels, font=fontype, cex=1.5)
+  dev.off()
+}
+
+
+```
+
+## Compute FST values using EIG
+
+
+```{bash eval=FALSE}
+
+wrkDir="/sandbox/shares/mages/WGS_PREGO_Finistere_GAZEL/isabel/FR_MS_PS_POBI_HGDP/PREGO_FrWGS_match"
+fName="FR_MS_PS_POBI_HGDPMbu_Basq_Orc_Sar.commonSNPs.flipped.hwe.maf0.05"
+cd $wrkDir
+mkdir pca
+
+#prunning before computing FST
+module load plink 
+plink --noweb --memory 5000 --bfile $wrkDir/fstats/$fName --indep-pairwise 50 5 0.5 --out $wrkDir/pca/LD_prune
+plink --noweb --memory 5000 --bfile $wrkDir/fstats/$fName --extract $wrkDir/pca/LD_prune.prune.in --make-bed --keep-allele-order --out $wrkDir/pca/$fName.pruned
+#converting to vcf
+plink --noweb --memory 5000 --bfile $wrkDir/pca/$fName.pruned --real-ref-alleles --recode vcf-iid --out $wrkDir/pca/$fName.pruned 
+
+#get pop
+cat withinFST.txt | awk '{print $3}' |sort | uniq -c | awk '{print $2}' | while read pop; do grep $pop withinFST.txt | awk '{print $2}' > pca/$pop.txt; done
+
+module load vcftools
+#below it is just an example how to do it for a pair of pops
+#vcftools --vcf $wrkDir/pca/$fName.pruned.vcf --weir-fst-pop $wrkDir/pca/France.txt --weir-fst-pop $wrkDir/pca/Finland.txt --out $wrkDir/pca/France_Finland
+
+#in order to run for all pairwise comparisons, including French and non-French populations, do in the head node:
+wrkDir="/sandbox/shares/mages/WGS_PREGO_Finistere_GAZEL/isabel/FR_MS_PS_POBI_HGDP/PREGO_FrWGS_match"
+cd  $wrkDir
+popArray=()
+for file in pca/*.txt;
+do
+popN=`echo $file | sed 's/.*\/\(.*\)/\1/' | sed 's/\(.*\).txt/\1/'`;
+popArray+=( $popN )
+done
+#note that the popArray does not contain info by the end of hte loop
+cd 
+while true;
+do 
+fixedPop=${popArray[0]}
+popArray=("${popArray[@]:1}")
+echo ""
+for comp in ${popArray[@]}; 
+do
+echo "Population X: $fixedPop Population Y: $comp"
+qsub -S /bin/bash -cwd SCRIPTS_kamelot/compute_pairFst_vcftools.bash $fixedPop $comp
+done
+if [ ${#popArray[@]} -eq 1 ]; then
+break;
+fi
+echo ""
+done
+
+cd  $wrkDir
+#creating again an array with the name of the populations
+popArray=()
+for file in pca/*.txt;
+do
+popN=`echo $file | sed 's/.*\/\(.*\)/\1/' | sed 's/\(.*\).txt/\1/'`;
+popArray+=( $popN )
+done
+cd 
+
+for pop in ${popArray[*]};
+do
+grep $pop compute_pairFst_vcftools.bash.e408* | grep "out" | awk '{print $1}' | sed 's/\(.*\):/\1/' | while read file; do popComb=`grep "out /sandbox/shares/mages/WGS_PREGO_Finistere_GAZEL/isabel/FR_MS_PS_POBI_HGDP/PREGO_FrWGS_match/pca/" $file | sed 's/.*\/\(.*\)/\1/'`; grep "weighted Fst estimate" $file | sed 's/.*\:\(.*\)/\1/' > FST_$popComb.txt;
+done
+done
+
+#The loop above creates a txt file with FST values for all the pairwise comparisons
+#To prepare the files for plotting we need to change the file name from FST_non-French_french.txt
+# to FST_french_non-French.txt
+wrkDir="/sandbox/shares/mages/WGS_PREGO_Finistere_GAZEL/isabel/FR_MS_PS_POBI_HGDP/PREGO_FrWGS_match/pca"
+cd  $wrkDir
+FRPOPS=( "cluster1" "cluster2" "cluster3" "ALSACE.LORRAINE" "NORD-PAS-DE-CALAIS.PICARDIE" "CENTRE"  "LIMOUSIN.POITOU-CHARENTES" "BASSE-NORMANDIE.HAUTE-NORMANDIE" )
+for p in ${FRPOPS[@]}; do 
+echo "$p"
+listFiles=`ls *_${p}.txt`;
+if [ ! -z "$listFiles" ]; then
+ls *_${p}.txt | while read file; do
+pop1=`echo $file | sed 's/FST_\(.*\)_.*/\1/'`;
+if [[ ! "${FRPOPS[@]}" =~ "$pop1" ]]; then
+echo $file;
+mv $file FST_${p}_$pop1.txt
+fi
+done
+fi
+done
+
+#check whether all the FR pops have the same nb of files
+for p in ${FRPOPS[@]}; do 
+ls FST_${p}_* | wc -l;
+done
+
+```
+
+### Gathering and plotting FST values
+
+``````{r echo=FALSE}
+
+wrkDir="/sandbox/shares/mages/WGS_PREGO_Finistere_GAZEL/isabel/FR_MS_PS_POBI_HGDP/PREGO_FrWGS_match"
+
+FstFiles <- list.files(path=paste0(wrkDir, "/pca"), pattern="FST_*")
+
+#FRENCH POPULATIONS
+#generating list of comparisons
+FRPOPS=c("cluster1","cluster2","cluster3","ALSACE.LORRAINE","NORD-PAS-DE-CALAIS.PICARDIE","CENTRE", "LIMOUSIN.POITOU-CHARENTES","BASSE-NORMANDIE.HAUTE-NORMANDIE")
+
+FRCLUSTERS=c("EBP", "WBR", "SLO", "GRA", "HAU", "CEN", "NOU", "NOR")
+fst_values <- list()
+for(p in sort(FRPOPS)) {
+  
+  tmpFst <- c()
+  for(comb in sort(FRPOPS)[which(sort(FRPOPS) != p)]) {
+    readFile <- scan(paste0(wrkDir,"/pca/FST_", p, "_", comb, ".txt"), what = numeric(), nlines = 1)
+    tmpFst <- c(tmpFst, readFile) 
+  }
+  fst_values[[p]] <- tmpFst
+  FRPOPS <- sort(FRPOPS)[-1]
+}
+
+FRPOPS=c("cluster1","cluster2","cluster3","ALSACE.LORRAINE","NORD-PAS-DE-CALAIS.PICARDIE","CENTRE", "LIMOUSIN.POITOU-CHARENTES","BASSE-NORMANDIE.HAUTE-NORMANDIE")
+fst_m <- matrix(rep(NA, length(FRCLUSTERS)*length(FRCLUSTERS)), ncol = length(FRCLUSTERS))
+colnames(fst_m) <- FRCLUSTERS[order(FRPOPS)]
+rownames(fst_m) <- FRCLUSTERS[order(FRPOPS)]
+
+COUNT <- 2
+for(p in 1:length(fst_values)) {
+  
+  fst_m[p,COUNT:ncol(fst_m)] <- fst_values[[p]]
+  COUNT <- COUNT+1
+}
+finalOrderCLUSTERs <- c("WBR", "EBP", "SLO", "NOR", "HAU", "GRA", "CEN", "NOU")
+fst_m <- fst_m[match(finalOrderCLUSTERs,colnames(fst_m)), match(finalOrderCLUSTERs,colnames(fst_m))]
+write.table(fst_m, file=paste0(wrkDir,"/pca/FST_pairwiseTable.txt"), col.names=NA, row.names=T, quote = F, sep = "\t")
+
+#the file above was changed manually to have the upper diagonal filled in and the lower diag with NA.
+#and then copied locally:
+
+library("lattice")
+library("viridis") 
+
+wrkDir="/home/ialves/Dropbox/instDuThorax/PREGO_FR-WGS"
+openM <- read.table(paste0(wrkDir, "/pca/FST_pairwiseTable.txt"), header = T)
+coord_x <- unlist(lapply(2:8, function(x) {x:8}))
+coord_y <- unlist(lapply(1:7, function(x) {rep(x,8-x)}))
+
+png(filename = paste0(wrkDir, "/pca/FST_pairwise_FrOnly.png"), width = 5, height = 6, units = 'in', res = 300)
+par(mar=c(10,2,1,2))
+levelplot(t(as.matrix(openM*1000)) , col.regions=rev(inferno(50))[-c(1:5)], scales=list(x=list(cex=1, rot=45), y=list(cex=1, alternating=2)), xlab="", ylab="", scales.margin="Fst", panel = function(...){
+            panel.levelplot(...)
+            panel.abline(coef = c(0,1))
+            ltext(x = coord_x, y= coord_y, labels =        round(t(as.matrix(openM*1000))[which(!is.na(t(as.matrix(openM*1000))))], digits = 2), 
+                  cex = 1, font = 2, col = "white")
+        }, colorkey=list(labels=list(cex=1, font=1, col="black"), height=1, width=1.4, title="FST x 1000", space="bottom", row=1, column=2, vjust=2))
+dev.off()
+
+#FRENCH and non-French populations - in the cluster
+module load R
+R
+wrkDir="/sandbox/shares/mages/WGS_PREGO_Finistere_GAZEL/isabel/FR_MS_PS_POBI_HGDP/PREGO_FrWGS_match/pca"
+FRPOPS=c("cluster2", "cluster1", "cluster3","BASSE-NORMANDIE.HAUTE-NORMANDIE", "NORD-PAS-DE-CALAIS.PICARDIE", "ALSACE.LORRAINE", "CENTRE", "LIMOUSIN.POITOU-CHARENTES")
+finalOrderCLUSTERs <- c("WBR", "EBP", "SLO", "NOR", "HAU", "GRA", "CEN", "NOU")
+
+remaingOrder <- c("NIreland", "Ireland", "Dyfed", "Gwynedd","Cornwall","Orcadian", "Kent", "Norfolk", "UK", "Denmark", "Norway","Sweden", "Finland", "Belgium", "Germany", "Poland", "Italy", "Sardinian", "Basque","Spain")
+matrix_FST_fr_noFr <- matrix(rep(NA, length(FRPOPS)*length(remaingOrder)), ncol = length(remaingOrder))
+colnames(matrix_FST_fr_noFr) <- remaingOrder
+rownames(matrix_FST_fr_noFr) <- FRPOPS
+
+for(frPop in FRPOPS) {
+  for(eurPop in remaingOrder) {
+    fst_tmp <- scan(paste0(wrkDir, "/FST_", frPop, "_", eurPop, ".txt"))
+    matrix_FST_fr_noFr[match(frPop, rownames(matrix_FST_fr_noFr)), match(eurPop, colnames(matrix_FST_fr_noFr))] <- fst_tmp
+  }  
+}
+colnames(matrix_FST_fr_noFr) <- substr(remaingOrder,start=1, stop=4)
+rownames(matrix_FST_fr_noFr) <- finalOrderCLUSTERs
+write.table(matrix_FST_fr_noFr, file=paste0(wrkDir,"/FST_pairwiseTable_frAndNonFr.txt"), col.names=NA, row.names=T, quote = F, sep = "\t")
+
+scp alves-i@bird2login.univ-nantes.fr:/sandbox/shares/mages/WGS_PREGO_Finistere_GAZEL/isabel/FR_MS_PS_POBI_HGDP/PREGO_FrWGS_match/pca/FST_pairwiseTable_frAndNonFr.txt .
+#locally
+library("lattice")
+library("viridis") 
+
+wrkDir="/home/ialves/Dropbox/instDuThorax/PREGO_FR-WGS"
+openM <- read.table(paste0(wrkDir, "/pca/FST_pairwiseTable_frAndNonFr.txt"), header = T)
+coord_x <- 1:ncol(openM)
+coord_y <- rep(1:nrow(openM), each=ncol(openM))
+
+png(filename = paste0(wrkDir, "/pca/FST_pairwise_frAndNonFr.png"), width = 10, height = 6, units = 'in', res = 300)
+par(mar=c(10,2,1,2))
+levelplot(t(as.matrix(openM*1000)) , col.regions=rev(inferno(50))[-c(1:5)], scales=list(x=list(cex=1, rot=45), y=list(cex=1)), xlab="", ylab="", scales.margin="Fst", panel = function(...){
+            panel.levelplot(...)
+            ltext(x = coord_x, y= coord_y, labels =        round(t(as.matrix(openM*1000))[which(!is.na(t(as.matrix(openM*1000))))], digits = 2), 
+                  cex = 1, font = 2, col = "white")
+        }, colorkey=list(labels=list(cex=1, font=1, col="black"), height=1, width=1.4, title="FST x 1000", space="bottom", row=1, column=2, vjust=2))
+dev.off()
+
+```
+
+

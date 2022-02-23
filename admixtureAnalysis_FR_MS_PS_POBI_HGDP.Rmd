@@ -1,0 +1,203 @@
+---
+title: "Supervised Admixture"
+author: "Isabel Alves"
+date: "8/26/2020"
+output: html_document
+---
+
+## Supervised Admixture analysis
+
+This report describes the steps taken to perform a supervised Admixture analysis using: Ireland, Germany and Spain as source populations of all the French samples:
+
+1) Perform PCA to detect outliers
+1.1) downsample to 350 
+
+
+```{bash eval=FALSE}
+module load plink
+wrkDir="/sandbox/shares/mages/WGS_PREGO_Finistere_GAZEL/isabel/FR_MS_PS_POBI_HGDP"
+cd $wrkDir
+fileName="FR_MS_PS_POBI_HGDPMbu_Basq_Orc_Sar.commonSNPs.flipped.hwe.maf0.05"
+
+#sample 100 samples from each pop
+nbSamples=350
+cat samples_IDS/IDs_regions_Department.txt | awk '{print $2}' | sort | uniq -c | awk '{if($1 >= '"$nbSamples"') {print "Pop", $2 ,"has more than", '"$nbSamples"', "individuals. Resampling..."}}'
+
+cat samples_IDS/IDs_regions_Department.txt | awk '{print $2}' | sort | uniq -c | while read Line; do echo $Line | awk '{if($1 >= '"$nbSamples"') {print "Pop", $2 ,"has more than", '"$nbSamples"', "individuals. Resampling..."}else{print "Pop", $2, "has", $1 "samples"}}'; done 		
+
+cat samples_IDS/IDs_regions_Department.txt | awk '{print $2}' | sort | uniq -c | while read Line; do echo $Line | awk '{if($1 >= '"$nbSamples"') {print "Pop", $2 ,"has more than", '"$nbSamples"', "individuals. Resampling..."}}'; pop=`echo $Line | cut -d$' ' -f2`; ss=`echo $Line | cut -d$' ' -f1`; if [[ "$pop" != "-9" ]]; then if [ $ss -gt $nbSamples ]; then echo $pop; grep $' '$pop$' ' samples_IDS/IDs_regions_Department.txt | shuf -n $nbSamples | awk '{print $1}' >> samples_IDS/samples_ss${nbSamples}.txt; else echo "$pop has less than $nbSamples samples"; grep $' '$pop$' ' samples_IDS/IDs_regions_Department.txt | awk '{print $1}' >> samples_IDS/samples_ss${nbSamples}.txt; fi; fi; done
+
+plink --noweb --memory 5000 --bfile $wrkDir/$fileName --indep-pairwise 50 5 0.1 --out $wrkDir/pca/LD_prune
+plink --noweb --memory 5000 --bfile $wrkDir/$fileName --extract $wrkDir/pca/LD_prune.prune.in --make-bed --keep-allele-order --out $wrkDir/pca/$fileName.pruned
+
+#47677 sites kept
+#set to -9 samples to remore while converting to EIGENSTRAT
+
+cat $wrkDir/pca/$fileName.pruned.fam | while read Line; do sample=`echo $Line | awk '{print $2}'`; ds=`grep $sample samples_IDS/samples_ss${nbSamples}.txt`; if [ ! -z "$ds" ]; then local=`grep $sample samples_IDS/IDs_regions_Department.txt | cut -d$' ' -f2`; paste -d$' ' <(echo $Line | awk '{print $1,$2,$3,$4,$5}') <(echo $local) >> $wrkDir/pca/$fileName.pruned.pca.fam; else paste -d$' ' <(echo $Line | awk '{print $1,$2,$3,$4,$5}') <(echo "-9") >> $wrkDir/pca/$fileName.pruned.pca.fam; fi; done
+
+mv pca/$fileName.pruned.bed pca/$fileName.pruned.pca.bed
+mv pca/$fileName.pruned.bim pca/$fileName.pruned.pca.bim
+
+fname="$wrkDir/pca/$fileName.pruned.pca"
+sed 's/Mbuti/-9/g' $fname.fam > $fname.noMbu.fam
+
+(
+echo "genotypename:    $fname.bed"   
+echo "snpname:         $fname.bim"
+echo "indivname:       $fname.noMbu.fam"
+echo "outputformat:    EIGENSTRAT"
+echo "genotypeoutname: $fname.geno"
+echo "snpoutname:      $fname.snp"
+echo "indivoutname:    $fname.ind"
+echo "familynames:     NO"
+) > $wrkDir/pca/convert.pca.input
+
+
+$HOME/EIG-6.1.4/bin/convertf -p $wrkDir/pca/convert.pca.input > $wrkDir/pca/convert.pca.input.log
+#ind file contains: 5072 individuals (-10Mbuti than the corresponding .fam)
+#snp file contains: 47677 SNPs
+(
+echo "genotypename:  $fname.geno"
+echo "snpname:       $fname.snp"
+echo "indivname:     $fname.ind"
+echo "evecoutname:   $wrkDir/pca/FR_MS_PS_HGDP_POBI.evec"
+echo "evaloutname:   $wrkDir/pca/FR_MS_PS_HGDP_POBI.eval"
+echo "deletesnpoutname: EIG_removed_SNPs"
+echo "numoutevec: 10"
+echo "fsthiprecision: YES"
+) > $wrkDir/pca/FR_MS_PS_HGDP_POBI.par
+
+$HOME/EIG-6.1.4/bin/smartpca -p $wrkDir/pca/FR_MS_PS_HGDP_POBI.par > $wrkDir/pca/FR_MS_PS_HGDP_POBI.par.log
+
+#outliers detected in the pca will be removed before performing the supervised admixture analysis
+#no outliers detected in $wrkDir/pca/FR_MS_PS_HGDP_POBI.par.log
+
+SOURCEPOPS=( "Spain" "Ireland" "Germany" )
+FRPOPS=( "ALSACE.LORRAINE" "BASSE-NORMANDIE.HAUTE-NORMANDIE" "BRETAGNE" "CENTRE" "LIMOUSIN.POITOU-CHARENTES" "NORD-PAS-DE-CALAIS.PICARDIE" "PAYS-DE-LA-LOIRE" )
+
+allPOPS=("${FRPOPS[@]}" "${SOURCEPOPS[@]}")
+
+for pop in ${allPOPS[*]}; do 
+echo $pop;
+grep $' '$pop $fname.fam | awk '{OFS=" "; print $1,$2}' >> samples_IDS/samples_Admx_plink_tmp.txt;
+echo "";
+done
+
+plink --noweb --memory 5000 --bfile $fname --keep $wrkDir/samples_IDS/samples_Admx_plink_tmp.txt --keep-allele-order --make-bed --out $wrkDir/admixture/FR_Spain_Germ_Ire.SUPERADMIX
+
+plink --noweb --memory 5000 --bfile $wrkDir/admixture/FR_Spain_Germ_Ire.SUPERADMIX --geno 0.10 --keep-allele-order --make-bed --out $wrkDir/admixture/FR_Spain_Germ_Ire.SUPERADMIX.genoRate10
+
+#nb SNP 45636
+fileName="FR_Spain_Germ_Ire.SUPERADMIX.genoRate10"
+
+cat admixture/$fileName.fam | while read Line; do sample=`echo $Line | awk '{print $2}'`; local=`grep $sample samples_IDS/IDs_regions_Department.txt | awk '{print $2}'`; if [[ "$local" != "Spain" ]] && [[ "$local" != "Ireland" ]] && [[ "$local" != "Germany" ]]; then echo "-" >> admixture/$fileName.pop; else echo "$local" >> admixture/$fileName.pop; fi; done
+
+#run ADMIXTURE
+for i in {1..10}; do
+echo $i
+mkdir $wrkDir/admixture/K3_${i}
+cd $wrkDir/admixture/K3_${i}
+cp /sandbox/users/alves-i/admixture/admixture_linux-1.3.0/admixture .
+./admixture $wrkDir/admixture/$fileName.bed 3 --supervised -j8 > K3_${i}.log
+done
+
+#locally
+cd /home/ialves/Dropbox/instDuThorax/FR_MS_PS_HGDP_POBI/admixture
+cat FR_Spain_Germ_Ire.SUPERADMIX.genoRate10.fam | awk '{print $2}' | while read sample; do ID=`echo $sample | sed 's/.*:\(.*\)/\1/'`; echo $ID; grep $ID all_samples_FR_MS_PS_POBI_Mbu_Basq_Orc_Sar_HGDP.txt | awk '{print $2}' >> sampleOrigin.txt; done
+
+```
+
+## plotting R admixture proportions
+
+```{r echo=TRUE}
+require(scales)
+wrkDir <- "/home/ialves/Dropbox/instDuThorax/FR_MS_PS_HGDP_POBI/admixture"
+
+originInfoFile <- "sampleOrigin.txt"
+clusterInfoDir <- "/home/ialves/Dropbox/instDuThorax/PREGO_FR-WGS"
+clusterInfoFiles <- paste0("cluster", 1:3, "_PREGOsamples.txt")
+plinkFileFam <- "FR_Spain_Germ_Ire.SUPERADMIX.genoRate10.fam"
+admOut <- "FR_Spain_Germ_Ire.SUPERADMIX.genoRate10.3.Q"
+
+openPlink <- read.table(paste0(wrkDir, "/", plinkFileFam), header = F)
+openSampleInfoFile <- read.table(paste0(wrkDir, "/", originInfoFile), header = F)
+openAdmOutput <- read.table(paste0(wrkDir, "/", admOut), header = F)
+
+orderToPresent <- c("BRETAGNE", "BASSE-NORMANDIE.HAUTE-NORMANDIE", "NORD-PAS-DE-CALAIS.PICARDIE",
+                    "ALSACE.LORRAINE", "PAYS-DE-LA-LOIRE", "CENTRE", "LIMOUSIN.POITOU-CHARENTES", "Ireland", "Germany", "Spain")
+publishNames <- c("Brittany", "Normandie", "Hauts-de-France", "Grand Est", "Pays-de-la-Loire", "Centre", "Nouvelle Aquitaine", "Ireland", "Germany", "Spain")
+publishACRO <- c("BRE", "NOR", "HAU", "GRA", "PAY", "CEN", "NOU")
+
+nrow(openPlink)
+nrow(openAdmOutput)
+nrow(openSampleInfoFile)
+
+tableIND_PROP_ORI <- cbind(as.character(openPlink[,2]), openAdmOutput, openSampleInfoFile)
+colnames(tableIND_PROP_ORI) <- c("ID", "X1", "X2", "X3", "Origin")
+new_order <- sapply(orderToPresent, function(x){which(tableIND_PROP_ORI$Origin == x)})
+df <- tableIND_PROP_ORI[unlist(new_order),]
+
+tableIND_PROP_ORI$Origin <- factor(tableIND_PROP_ORI$Origin, levels = orderToPresent)
+sampleSizes <- table(tableIND_PROP_ORI$Origin)
+cumSum_ss <- as.vector(cumsum(sampleSizes))
+
+#plotting ADMIXTURE proportions barplot and boxplot
+png(file=paste0(wrkDir, "/FR_MS_PS_POBI_HGDP_admix_supervised_", Sys.Date(),".png"), height=3, width = 7,
+    units = 'in', res = 300)
+par(mar=c(6,4,1,1))
+colorRef <- alpha(c("palegreen3", "tomato3", "mediumvioletred"), 0.8)
+barplot(t(df[,c(2:4)]), col=colorRef, axes = FALSE, xaxt='n', ylab="", border=NA, width = 1, space = 0)
+title(ylab="Admixture Proportions", line=0.5, cex.lab=0.8)
+text(sampleSizes/2+c(0,cumSum_ss[-length(cumSum_ss)]), par("usr")[3]-0.15,
+     srt = 60, adj= 1, xpd = TRUE,
+     labels = publishNames, cex=0.8)
+abline(v=cumSum_ss[-length(cumSum_ss)], lwd=2)
+polygon(x=c(0,0,cumSum_ss[length(cumSum_ss)],cumSum_ss[length(cumSum_ss)]), y=c(0,1,1,0))
+dev.off()
+
+df$pop <- tableIND_PROP_ORI$Origin[unlist(new_order)]
+png(file=paste0(wrkDir, "/FR_MS_PS_POBI_HGDP_admix_supervised_BOXPLOT_", Sys.Date(),".png"), height=3, width = 6,
+    units = 'in', res = 300)
+par(mar=c(6,4,1,1))
+boxplot(df$X3~df$pop, at=seq(3,length(publishNames)*3+11, by=4), xlim=c(1,length(publishNames)*3+11), xaxt='n',
+        ylab = "", xlab = "", col=colorRef[3], cex.axis=1)
+title(ylab="Admixture Proportions", line=2, cex.lab=0.8)
+boxplot(df$X1~df$pop, at=seq(1,length(publishNames)*3+9, by=4), add = T, xaxt='n', col=colorRef[1], yaxt='n')
+boxplot(df$X2~df$pop, at=seq(2,length(publishNames)*3+10, by=4), add = T, xaxt='n', col=colorRef[2], yaxt='n')
+#axis(1, at=seq(2,length(popNames)*3+10, by=4), labels = "", las=2, cex.axis=0.8)
+text(x=seq(2,length(publishNames)*3+10, by=4), par("usr")[3]-0.1, xpd = TRUE, srt=45, pos=2,
+     offset = 0.1, labels=publishNames, cex =1 )
+dev.off()
+
+#plot admixture proportions per cluster
+indID <- list()
+admPropClusters <- list()
+for(cluster in clusterInfoFiles){
+  
+  clusterName <- unlist(strsplit(cluster, split = "_"))[1]
+  print(clusterName)
+  openTmpFile <- read.table(paste0(clusterInfoDir,"/", cluster), header = F)
+  indID[[clusterName]] <- as.character(openTmpFile[,1])
+  indexToFilter <- match(indID[[clusterName]],tableIND_PROP_ORI$ID)[!is.na(match(indID[[clusterName]],tableIND_PROP_ORI$ID))]
+  admPropClusters[[clusterName]] <- tableIND_PROP_ORI[indexToFilter,]
+  print(nrow(admPropClusters[[clusterName]]))
+  admPropClusters[[clusterName]][,5] <- clusterName
+}
+
+tableAdmPropClusters <- as.data.frame(do.call(rbind, admPropClusters))
+publishNames <- c("cluster2", "cluster1", "cluster3")
+acroClusters <- c("WBR", "EBP", "SLO")
+tableAdmPropClusters$Origin <- factor(tableAdmPropClusters$Origin, levels = publishNames)
+
+png(file=paste0(wrkDir, "/FR_MS_PS_POBI_HGDP_admix_supervised_BOXPLOT_", Sys.Date(),"_Clusters.png"), height=3, width = 3, units = 'in', res = 300)
+par(mar=c(3,4,1,1))
+boxplot(tableAdmPropClusters$X3~tableAdmPropClusters$Origin, at=seq(3,length(publishNames)*3+length(publishNames), by=4), xlim=c(0,length(publishNames)*3+length(publishNames)), xaxt='n', ylab = "", xlab = "", col=colorRef[3], cex.axis=1)
+title(ylab="Admixture Proportions", line=2, cex.lab=1)
+boxplot(tableAdmPropClusters$X1~tableAdmPropClusters$Origin, at=seq(1,length(publishNames)*3+length(publishNames), by=4), add = T, xaxt='n', col=colorRef[1], yaxt='n')
+boxplot(tableAdmPropClusters$X2~tableAdmPropClusters$Origin, at=seq(2,length(publishNames)*3+length(publishNames), by=4), add = T, xaxt='n', col=colorRef[2], yaxt='n')
+#axis(1, at=seq(2,length(popNames)*3+10, by=4), labels = "", las=2, cex.axis=0.8)
+text(x=seq(2,length(publishNames)*3+length(publishNames), by=4), par("usr")[3]-0.1, xpd = TRUE, srt=45, pos=2,
+     offset = 0.1, labels=acroClusters, cex = 1.2)
+dev.off()
+
+```

@@ -1,0 +1,3965 @@
+---
+title: "aDNA analyses FRwgs"
+author: "Isabel Alves"
+date: "4/14/2020"
+output:
+  html_document: default
+  pdf_document: default
+---
+
+## Description
+
+This report describes all the steps involved in the aDNA analyses performed in the context of the study of western France. It describes the datasets used, samples selection and specific analyses performed. 
+
+In this part of the study I used: 
+
+Reich's meta-dataset published on the 1st of March 2020 - 1240K+HO <https://reich.hms.harvard.edu/downloadable-genotypes-present-day-and-ancient-dna-data-compiled-published-papers>
+
+the Vikings dataset sent by Fernando Racimo and located in the BiRD cluster:
+
+/sandbox/shares/mages/WGS_PREGO_Finistere_GAZEL/isabel/Vikings
+
+the French WGS in plink file format located equally located in the BiRD cluster:
+
+/sandbox/shares/mages/WGS_PREGO_Finistere_GAZEL/isabel/plink/plinkFiles/20180323.FRENCHWGS.REF0002.allCHROM.[bim bed fam]
+
+To the 1240K+HO dataset I applied a series of filtering of the samples in order to reduce the amount and keep good quality samples:
+
+1) I kept only those samples with PASS 
+2) I kept only samples with no Ignore criteria in the 1240K+HO. 
+
+The number of aDNA samples with PASS criteria (based on contamination QC) are the following: 
+
+samples | Country
+--------|----------
+   10   | Austria
+    9   | Belgium
+   81   | Czech_Republic
+    6   | Denmark
+  120   | France
+  255   | Germany
+  345   | Great_Britain
+   68   | Greece
+  201   | Hungary
+   41   | Iceland
+   14   | Ireland
+  352   | Italy
+    3   | Luxembourg
+   11   | Netherlands
+   15   | Norway
+   79   | Poland
+   38   | Portugal
+ 1528   | Russia
+  639   | Spain
+   70   | Sweden
+    4   | Switzerland
+
+From Russia I will just keep Yamnaya populations to reduce the number of samples to handle. 
+Based on the populations above I created a set of periods that could be interesing for the analysis (+ HumanOrigin and/or 1KGP)
+
+```{bash eval=FALSE}
+
+COUNTRIES=( "Spain" "France" "Portugal" "Great Britain" "Ireland" "Denmark" "Norway" "Italy" \
+"Austria" "Iceland" "Russia" "Greece" "Germany" "Switzerland" "Luxembourg" "Belgium" \
+"Netherlands" "Poland" "Hungary" "Czech Republic" "Sweden" "Turkey" )
+
+for eurC in "${COUNTRIES[@]}";  do  
+sizeString=`echo $eurC | wc -w`;  if [ $sizeString -eq 2 ];
+then outName=`echo $eurC | sed 's/ /_/g'`;
+echo $outName;
+cat v42.4.1240K_HO.anno | grep $'\t'"$eurC"$'\t' > ${outName}.samples.txt; 
+else
+cat v42.4.1240K_HO.anno | grep $'\t'"$eurC"$'\t' > ${eurC}.samples.txt;
+fi;
+done
+
+#keep only the ones with PASS
+for file in *.samples.txt; do 
+fname=`echo $file | sed 's/\(.*\).txt/\1/'`; 
+echo $fname; 
+grep PASS $file > $fname.PASS.txt;
+done
+
+#get samples size per country and country name
+for file in *.samples.PASS.txt; do 
+fname=`echo $file | sed 's/\(.*\).samples.PASS.txt/\1/'`; 
+nbRows=`wc -l $file | cut -d$' ' -f1`;
+echo "$nbRows $fname";
+done
+
+#get nb of samples from different periods
+for file in *.samples.PASS.txt; do
+fname=`echo $file | sed 's/\(.*\).samples.PASS.txt/\1/'`; 
+nbSamples=`grep EN $file | cut -d$'\t' -f1`;
+echo "$fname $nbSamples"; 
+done
+
+#remove Ignore
+for file in *.PASS.txt; do
+fname=`echo $file | sed 's/\(.*\).samples.PASS.txt/\1/'`; 
+echo $fname;
+grep -v Ignore $file > $fname.samples.PASS.noIgnore.txt;
+done
+
+#create a file with the name of the aDNA samples to keep
+(
+echo "Mesolithic"
+echo "_LBK"
+echo "_EN"
+echo "_N"
+echo "_MN"
+echo "_MLN"
+echo "_LN"
+echo "_C"
+echo "_EBA"
+echo "_BA"
+echo "_MBA"
+echo "_MLBA"
+echo "_LBA"
+echo "BellBeaker"
+echo "CordedWare"
+echo "Roman"
+echo "Saxon"
+echo "Medieval"
+echo "Falkenstein"
+echo "HohleFels"
+echo "Imperial"
+echo "HumanOrigins"
+echo "1KGPhase3"
+) > periods.txt
+
+```
+
+I selected all the samples from the countries in the table above falling in these periods (using grep). After I verified manually if samples had been properly assigned to the corresponding period (using grep can fetch other stuff beyond what we want), removed relatives and samples with any contamination or other notes. 
+
+Secondly, I removed all those samples with less than 50k SNPs in order to avoid bias (according to Antonio et al 2019 Science - Italy). 
+
+Besides, samples from the countries and periods mentioned above I also generated a set of samples to be used as "right samples" in the qpAdm software. This set contains those samples used in the Genetics of France paper as well as other outgroup populations used in Antonio et al 2019 Science, Marcus et al 2019 Nat Communic, Olalde et al 2018 2019. 
+
+```{bash eval=FALSE}
+for file in *.samples.PASS.noIgnore.txt; do 
+popName=`echo $file | sed 's/\(.*\).samples.PASS.noIgnore.txt/\1/'`; 
+echo $popName; 
+mkdir $popName
+while IFS= read -r line
+do
+if [[ "$line" =~ "_" ]]; then 
+period=`echo $line | sed 's/_\(.*\)/\1/'`
+nbRows=`grep $line $file`;
+if [ ! -z "$nbRows" ]; then
+grep $line $file > $popName/$popName.$period.txt;
+fi
+else
+nbRows=`grep $line $file`;
+if [ ! -z "$nbRows" ]; then
+grep $line $file > $popName/$popName.$line.txt;
+fi
+fi
+done < periods.txt
+done
+
+# Keeping only samples with more than 50,000 SNPs covered. 
+for pop in */; do 
+pop=${pop%/}; 
+echo "Processing files corresponding to population: $pop"; 
+for file in $pop/$pop.*; do
+echo $file; 
+done; 
+echo ""; 
+done
+
+for pop in */; do
+pop=${pop%/}; echo "Processing files corresponding to population: $pop"; 
+for file in $pop/$pop.*; do 
+echo $file; outName=`echo $file | sed 's/.txt/.gt50k.txt/g'`;
+cat $file | awk -F "\t" '{if($15 > 50000){print $0}}' >> $outName; 
+done; 
+echo ""; 
+done
+
+#getting the pop ID
+for pop in */; do
+pop=${pop%/}; 
+echo "Processing files corresponding to population: $pop";
+for file in $pop/$pop.*.gt50k.txt; do
+echo $file; 
+cat $file | awk -F "\t" '{print $8}' | sort | uniq -c >> samplesSizes_popLabels.txt; 
+done; 
+echo ""; 
+done
+
+
+## Subset RIGHT POPULATIONS
+mkdir rightPops
+
+#create a subset with only right populations
+(
+echo "Mbuti"
+echo "Han"
+echo "AfontovaGora3"
+echo "ElMiron"
+echo "Karitiana"
+echo "Kontenki14"
+echo "MA1"
+echo "Mota"
+echo "Papuan"
+echo "Ust_Ishim"
+echo "Vestonice16"
+echo "Villabruna"
+echo "GoyetQ116-1"
+echo "Morocco_Iberomaurusian"
+) > rightPops/right_pops.txt
+
+while IFS= read -r line
+do
+nbSamples=`grep $line v42.4.1240K_HO.anno | wc -l`
+echo "Number of samples from $line : $nbSamples"
+if [ $nbSamples -gt 0 ]; then
+echo "Fetching samples from: $line";
+if [[ "$line" == "Han" ]] || [[ "$line" == "Mbuti" ]]; then
+echo "Fetching only HumanOrigins";
+grep $'\t'$line$'\t' v42.4.1240K_HO.anno | grep HumanOrigins >> rightPops/$line.samples.txt
+else
+grep $line v42.4.1240K_HO.anno >> rightPops/$line.samples.txt
+fi
+fi
+echo ""
+done < rightPops/right_pops.txt
+
+#getting the pop ID
+for file in rightPops/*.samples.txt; 
+do 
+echo $file;
+cat $file | awk -F "\t" '{print $8}' | sort | uniq -c >> rightPops/samplesSizes_popLabels_rightPops.txt; 
+done;
+
+#getting final set of population to extract from the original files: v42.4.1240K_HO.*
+cat samplesSizes_popLabels.txt | awk '{print $2}' >> final.pops.txt
+cat rightPops/samplesSizes_popLabels_rightPops.txt | awk '{print $2}' >> final.pops.txt 
+
+#for pop in */; do pop=${pop%/}; rm $pop/$pop.*.gt50k.txt; done
+
+#merge everything
+for file in *.samples.PASS.noIgnore.txt; do
+cat $file >> ALL.samples.PASS.noIgnore.txt; 
+done
+```
+
+## Filtering the 1240K+HO dataset
+
+
+```{bash eval=FALSE}
+#Extract aDNA and HumanOrigin samples 
+
+wrkDir="/sandbox/shares/mages/WGS_PREGO_Finistere_GAZEL/isabel/REICH_march2020"
+inFname="v42.4.1240K_HO"
+outFname="subset_ReichMarch2020"
+
+(
+echo "genotypename:    $wrkDir/ORIGINAL/$inFname.geno"   
+echo "snpname:         $wrkDir/ORIGINAL/$inFname.snp"
+echo "indivname:       $wrkDir/ORIGINAL/$inFname.ind"
+echo "outputformat:    EIGENSTRAT"
+echo "genotypeoutname: $wrkDir/SUBSET_finalPops/$outFname.geno"
+echo "snpoutname:      $wrkDir/SUBSET_finalPops/$outFname.snp"
+echo "indivoutname:    $wrkDir/SUBSET_finalPops/$outFname.ind"
+echo "familynames:     NO"
+echo "poplistname:     $wrkDir/final.pops.unique.txt"
+) > $wrkDir/convert.1240KHO.par
+
+/sandbox/users/alves-i/EIG-6.1.4/bin/convertf \
+-p $wrkDir/convert.1240KHO.par > $wrkDir/convert.1240KHO.log
+
+#changing SNP ids in REICH dataset. 
+mv $wrkDir/SUBSET_finalPops/subset_ReichMarch2020.snp \
+$wrkDir/SUBSET_finalPops/subset_ReichMarch2020.rs.snp
+
+cat SUBSET_finalPops/subset_ReichMarch2020.rs.snp \ 
+| awk '{OFS=" "; print $2":"$4,$2,$3,$4,$5,$6}' >> SUBSET_finalPops/subset_ReichMarch2020.snp
+
+```
+Extract autosomal SNPs
+
+
+## Handling Viking samples 
+```{bash eval=FALSE}
+
+#keep only Viking samples form the file F. Racimo sent
+wrkDir="/sandbox/shares/mages/WGS_PREGO_Finistere_GAZEL/isabel/Vikings"
+inName="vikings.ho.1240k.rnd.onlyVK"
+cd $wrkDir
+
+grep VK vikings.ho.1240k.rnd.fam | awk '{OFS=" "; print $1,$2}' >> vikings_only_to_extract.txt
+qlogin
+module load plink
+plink --noweb --memory 5000 --bfile ~/FR_WGS/Vikings/vikings.ho.1240k.rnd \
+--keep ~/FR_WGS/Vikings/vikings_only_to_extract.txt \
+--make-bed --keep-allele-order --out ~/FR_WGS/Vikings/vikings.ho.1240k.rnd.onlyVK
+
+(
+echo "genotypename:     $wrkDir/$inName.bed"
+echo "snpname:          $wrkDir/$inName.bim"
+echo "indivname:        $wrkDir/$inName.fam"
+echo "outputformat:     EIGENSTRAT"     
+echo "genotypeoutname:  $wrkDir/$inName.geno"
+echo "snpoutname:       $wrkDir/$inName.snp"
+echo "indivoutname:     $wrkDir/$inName.ind"
+echo "familynames:      NO"
+) > $wrkDir/convert.toEIGEN.par
+
+/sandbox/users/alves-i/EIG-6.1.4/bin/convertf \
+-p $wrkDir/convert.toEIGEN.par > $wrkDir/convert.toEIGEN.VK.log
+
+
+```
+
+
+## Merge 1240kHO dataset with the Viking dataset
+```{bash eval=FALSE}
+
+dirREICH="/sandbox/shares/mages/WGS_PREGO_Finistere_GAZEL/isabel/REICH_march2020/SUBSET_finalPops"
+reichFile="subset_ReichMarch2020"
+
+dirVK="/sandbox/shares/mages/WGS_PREGO_Finistere_GAZEL/isabel/Vikings"
+vkFile="vikings.ho.1240k.rnd.onlyVK"
+
+(
+echo "geno1:           $dirREICH/$reichFile.geno"
+echo "snp1:            $dirREICH/$reichFile.snp"
+echo "ind1:            $dirREICH/$reichFile.ind"
+echo "geno2:           $dirVK/$vkFile.geno"     
+echo "snp2:            $dirVK/$vkFile.snp"
+echo "ind2:            $dirVK/$vkFile.ind"
+echo "genooutfilename: $dirREICH/vk_1240kHO.geno"
+echo "snpoutfilename:  $dirREICH/vk_1240kHO.snp"
+echo "indoutfilename:  $dirREICH/vk_1240kHO.ind"
+echo "outputformat:    EIGENSTRAT"
+echo "docheck: YES"
+echo "strandcheck: YES"
+) > $dirREICH/input.MERGEIT.EIGENSTRAT.par
+
+/sandbox/users/alves-i/EIG-6.1.4/bin/mergeit \
+-p $dirREICH/input.MERGEIT.EIGENSTRAT.par > $dirREICH/input.MERGEIT.EIGENSTRAT.log
+
+module load plink
+plink --noweb --memory 5000 --bfile /sandbox/users/alves-i/FR_WGS/plink/plinkFiles/20180323.FRENCHWGS.REF0002.allCHROM.bis \
+--extract $dirREICH/snps_to_extract_FRWGs.txt --keep-allele-order --make-bed \ 
+--out /sandbox/users/alves-i/FR_WGS/REICH_march2020/FR_WGS_HO_SNPs/fr_vk_1240kHO
+
+
+#convert FR bed/bim/fam to EIGENSTRAT
+dirFRHO="/sandbox/users/alves-i/FR_WGS/REICH_march2020/FR_WGS_HO_SNPs"
+inName="fr_vk_1240kHO"
+
+(
+echo "genotypename:     $dirFRHO/$inName.bed"
+echo "snpname:          $dirFRHO/$inName.bim"
+echo "indivname:        $dirFRHO/$inName.bis.fam"
+echo "outputformat:     EIGENSTRAT"     
+echo "genotypeoutname:  $dirFRHO/$inName.geno"
+echo "snpoutname:       $dirFRHO/$inName.snp"
+echo "indivoutname:     $dirFRHO/$inName.ind"
+echo "familynames:      YES"
+) > $dirFRHO/convert.toEIGEN.par
+
+/sandbox/users/alves-i/EIG-6.1.4/bin/convertf \
+-p $dirFRHO/convert.toEIGEN.par > $dirFRHO/convert.toEIGEN.par.log
+
+
+#merging the three datasets
+dirREICH="/sandbox/shares/mages/WGS_PREGO_Finistere_GAZEL/isabel/REICH_march2020/SUBSET_finalPops"
+reichFile="vk_1240kHO"
+
+dirFRHO="/sandbox/shares/mages/WGS_PREGO_Finistere_GAZEL/isabel/REICH_march2020/FR_WGS_HO_SNPs"
+inName="fr_vk_1240kHO"
+
+(
+echo "geno1:           $dirREICH/$reichFile.geno"
+echo "snp1:            $dirREICH/$reichFile.snp"
+echo "ind1:            $dirREICH/$reichFile.ind"
+echo "geno2:           $dirFRHO/$inName.geno"     
+echo "snp2:            $dirFRHO/$inName.snp"
+echo "ind2:            $dirFRHO/$inName.ind"
+echo "genooutfilename: $dirREICH/fr_vk_1240kHO_full.geno"
+echo "snpoutfilename:  $dirREICH/fr_vk_1240kHO_full.snp"
+echo "indoutfilename:  $dirREICH/fr_vk_1240kHO_full.ind"
+echo "outputformat:    EIGENSTRAT"
+echo "docheck: YES"
+echo "strandcheck: YES"
+) > $dirREICH/input.MERGEIT.3DS.June.par
+
+/sandbox/users/alves-i/EIG-6.1.4/bin/mergeit \
+-p $dirREICH/input.MERGEIT.3DS.June.par > $dirREICH/input.MERGEIT.3DS.June.par.log
+
+#add pop info to the .ind file on the FR populations
+#first select samples locally
+
+wrDir="/home/ialves/Dropbox/instDuThorax/samples/all_samples_PrepToMergeWMathieson2015"
+
+cat sampleID_withCohort.txt | awk '{print $2}' | sort | uniq -c | while read line; do 
+ss=`echo $line | cut -d$' ' -f1`;
+popLabel=`echo $line | cut -d$' ' -f2`;
+echo "Population: $popLabel contains $ss individuals";
+if [ $ss -gt 50 ]; then 
+echo "";
+if [[ "$popLabel" == "BRETAGNE" ]] || [[ "$popLabel" == "PAYS-DE-LA-LOIRE" ]]; then
+grep $popLabel sampleID_withCohort.txt | cut -d$'\t' -f3 | sort | uniq -c | while read row; do
+depss=`echo $row | cut -d$' ' -f1`;
+depLabel=`echo $row | cut -d$' ' -f2`;
+if [ $depss -gt 50 ]; then
+grep $depLabel sampleID_withCohort.txt \ 
+| shuf -n 50 | cut -d$'\t' -f1 | sed 's/_/:/g' >> $depLabel.allSamples.txt; 
+else
+grep $depLabel sampleID_withCohort.txt \
+| cut -d$'\t' -f1 | sed 's/_/:/g' >> $depLabel.allSamples.txt; 
+fi
+done
+echo ""
+else
+grep $popLabel sampleID_withCohort.txt \
+| shuf -n 50 | cut -d$'\t' -f1 | sed 's/_/:/g' >> $popLabel.allSamples.txt; 
+fi
+else 
+echo ""; 
+grep $popLabel sampleID_withCohort.txt \
+| cut -d$'\t' -f1 | sed 's/_/:/g' >> $popLabel.allSamples.txt; 
+fi; 
+done
+
+
+for file in *.allSamples.txt; do 
+popName=`echo $file | sed 's/\(.*\).allSamples.txt/\1/'`; 
+echo $popName;
+cat $file | while read line; do
+paste <(echo $line | awk '{print $1}') <(echo $popName) >> $popName.allSamples.pop;
+done;
+done
+
+#generate a new .ind file with France lables
+wrDir="/sandbox/shares/mages/WGS_PREGO_Finistere_GAZEL/isabel/REICH_march2020/SUBSET_finalPops"
+cd $wrDir
+
+cat fr_vk_1240kHO_full.ind | while read line; do 
+popL=`echo $line | awk '{print $3}'`; 
+indID=`echo $line | awk '{print $1}'`
+if [[ "$popL" == "Control" ]]; then
+frSamples=`grep $indID /sandbox/users/alves-i/FR_WGS/REICH_march2020/FR_WGS_HO_SNPs/FRANCE.allSamples.pop`
+popLabel=`echo $frSamples | awk '{print $2}'`
+if [ ! -z "$frSamples" ]; then
+echo "$indID U $popLabel" >> fr_vk_1240kHO_full.bis.ind;
+else 
+echo "$indID U FranceUnknown" >> fr_vk_1240kHO_full.bis.ind;
+fi
+else
+echo $line >> fr_vk_1240kHO_full.bis.ind;
+fi
+done
+
+
+```
+
+## Compute f3(Mbuti; Vikings, X)
+
+```{bash eval=FALSE}
+wrkDir="/sandbox/shares/mages/WGS_PREGO_Finistere_GAZEL/isabel/REICH_march2020"
+cd $wrkDir
+
+mkdir fstats
+mkdir fstats/f3
+mkdir fstats/f3/input
+
+inputName="fr_vk_1240kHO_full"
+
+#generating list of comparisons
+FRPOPS=("FINISTERE" "COTES-DARMOR" "MORBIHAN" "ILLE-ET-VILAINE" "VENDEE" "CENTRE" \
+"LIMOUSIN.POITOU-CHARENTES" "BASSE-NORMANDIE.HAUTE-NORMANDIE" \
+"NORD-PAS-DE-CALAIS.PICARDIE" "ALSACE.LORRAINE")
+OTHERMODERN=("Basque" "English" "Scottish" "Sardinian" "GBR.SG" "Greek" \
+"Hungarian" "IBS.SG" "Icelandic" "Italian_North" "Italian_South" "Norwegian" \
+"Orcadian" "TSI.SG" "Spanish_North" "Spanish" "Sardinian")
+
+outgroup="Mbuti"
+cpop="Scotland_BellBeaker"
+EXCLUDESTR=($outgroup $cpop)
+
+POPARRAY=( "${FRPOPS[@]}" "${OTHERMODERN[@]}" )
+
+for pop in ${POPARRAY[@]}; do 
+	echo "$cpop $pop $outgroup" >> fstats/f3/input/list_f3outgroup_${outgroup}_${cpop}.txt; 
+	#generating par file 
+
+done; 
+(
+echo "genotypename:    $wrkDir/SUBSET_finalPops/$inputName.geno"
+echo "snpname:         $wrkDir/SUBSET_finalPops/$inputName.snp"
+echo "indivname:       $wrkDir/SUBSET_finalPops/$inputName.bis.ind"
+echo "popfilename:     $wrkDir/fstats/f3/input/list_f3outgroup_${outgroup}_${cpop}.txt"
+) > fstats/f3/input/par.f3testOutgroup_${outgroup}_${cpop}_sour2.par
+
+cd 
+AdmixTools/bin/qp3Pop \
+-p $wrkDir/fstats/f3/input/par.f3testOutgroup_${outgroup}_${cpop}_sour2.par \
+> $wrkDir/fstats/f3/output/f3Out_${cpop}.log
+```
+
+## Compute f4(Mbuti, BRETAGNE; England_BellBeaker, X)
+
+X can be any other BellBeaker
+    36 Czech_BellBeaker
+     28 England_BellBeaker
+      5 France_BellBeaker
+      2 France_BellBeaker_lowSteppe
+     39 Germany_BellBeaker
+     10 Germany_Lech_BellBeaker
+     10 Hungary_EBA_BellBeaker
+     33 Iberia_BellBeaker
+      3 Italy_North_BellBeaker
+      8 Netherlands_BellBeaker
+      6 Poland_BellBeaker
+      2 Scotland_BellBeaker
+      3 Switzerland_BellBeaker
+
+```{bash eval=FALSE}
+wrkDir="/sandbox/shares/mages/WGS_PREGO_Finistere_GAZEL/isabel/REICH_march2020"
+cd $wrkDir
+
+inputName="fr_vk_1240kHO_full"
+mkdir fstats
+mkdir fstats/f4
+mkdir fstats/f4/input
+
+#generating list of comparisons
+FRPOPS=("FINISTERE" "COTES-DARMOR" "MORBIHAN" "ILLE-ET-VILAINE" "VENDEE" "CENTRE" \
+"LIMOUSIN.POITOU-CHARENTES" "BASSE-NORMANDIE.HAUTE-NORMANDIE" "NORD-PAS-DE-CALAIS.PICARDIE" \
+"ALSACE.LORRAINE")
+OTHERMODERN=("Basque" "English" "Scottish" "Sardinian" "GBR.SG" "Greek" "Hungarian" \
+"IBS.SG" "Italian_North" "Italian_South" "Norwegian" "Orcadian" "TSI.SG" \
+"Spanish_North" "Spanish" "Sardinian")
+
+outgroup="Mbuti"
+bpop="France_BellBeaker"
+cpop="Icelandic" 
+
+grep BellBeaker SUBSET_finalPops/fr_vk_1240kHO_full.bis.ind \ 
+| awk '{print $3}' | sort | uniq -c | awk '{print $2}' | while read BBeak; do
+if [[ "$BBeak" != "$cpop" ]]; then 
+echo "$outgroup $bpop $cpop $BBeak" >> fstats/f4/input/list_f4testout_${outgroup}_${bpop}_${cpop}_X.txt
+fi
+done
+
+(
+echo "genotypename:    $wrkDir/SUBSET_finalPops/$inputName.geno"
+echo "snpname:         $wrkDir/SUBSET_finalPops/$inputName.snp"
+echo "indivname:       $wrkDir/SUBSET_finalPops/$inputName.bis.ind"
+echo "popfilename:     $wrkDir/fstats/f4/input/list_f4testout_${outgroup}_${bpop}_${cpop}_X.txt"
+) > fstats/f4/input/par.f4testout_${outgroup}_${bpop}_${cpop}_X.par
+
+
+```
+
+## Compute f4 (Mbuti, France_BellBeaker; Icelandic, X)
+
+```{bash eval=FALSE}
+wrkDir="/sandbox/shares/mages/WGS_PREGO_Finistere_GAZEL/isabel/REICH_march2020"
+cd $wrkDir
+
+inputName="fr_vk_1240kHO_full"
+
+
+#generating list of comparisons
+FRPOPS=("FINISTERE" "COTES-DARMOR" "MORBIHAN" "ILLE-ET-VILAINE" "VENDEE" "CENTRE" \
+"LIMOUSIN.POITOU-CHARENTES" "BASSE-NORMANDIE.HAUTE-NORMANDIE" \
+"NORD-PAS-DE-CALAIS.PICARDIE" "ALSACE.LORRAINE")
+OTHERMODERN=("Basque" "English" "Scottish" "Sardinian" "GBR.SG" "Greek" \
+"Hungarian" "IBS.SG" "Italian_North" "Italian_South" "Norwegian" "Orcadian" \
+"TSI.SG" "Spanish_North" "Spanish" "Sardinian")
+
+POPARRAY=( "${FRPOPS[@]}" "${OTHERMODERN[@]}" )
+
+outgroup="Mbuti"
+bpop="France_BellBeaker_lowSteppe"
+cpop="Icelandic" 
+
+for pop in ${POPARRAY[@]}; do
+if [[ "$pop" != "$cpop" ]]; then 
+echo "$outgroup $bpop $cpop $pop" >> fstats/f4/input/list_f4testout_${outgroup}_${bpop}_${cpop}_X.txt
+fi
+done
+(
+echo "genotypename:    $wrkDir/SUBSET_finalPops/$inputName.geno"
+echo "snpname:         $wrkDir/SUBSET_finalPops/$inputName.snp"
+echo "indivname:       $wrkDir/SUBSET_finalPops/$inputName.bis.ind"
+echo "popfilename:     $wrkDir/fstats/f4/input/list_f4testout_${outgroup}_${bpop}_${cpop}_X.txt"
+) > fstats/f4/input/par.f4testout_${outgroup}_${bpop}_${cpop}_X.par
+
+cd
+/sandbox/users/alves-i/AdmixTools/bin/qpDstat -p $wrkDir/fstats/f4/input/par.f4testout_${outgroup}_${bpop}_${cpop}_X.par > $wrkDir/fstats/f4/output/par.f4testout_${outgroup}_${bpop}_${cpop}_X.log
+```
+
+# qpAdm analyses
+
+## Samples 
+From Calcolithic to the present from France, Iberia, Italy, Switzerland, Germany, Denmark, Norway, Iceland and UK. 
+
+France:
+      5 France_BellBeaker
+      2 France_BellBeaker_lowSteppe
+
+Iberia:
+      3 Iberia_BellBeaker
+      4 Iberia_MBA.SG
+     23 Iberia_BA
+      3 Iberia_BA_Cogotas
+      1 Iberia_BA_published
+     13 Iberia_BellBeaker
+      1 Iberia_C_BA
+      3 Iberia_Celtiberian
+     38 Iberia_C
+      1 Iberia_EBA
+      2 Iberia_LBA_Cogotas
+      3 Iberia_Medieval_published
+      5 Iberia_Roman
+
+England:
+     18 England_BellBeaker
+     14 England_C_EBA
+      1 England_LBA
+      6 England_MBA
+      1 England_LIA_ERoman.SG
+      6 England_Roman.SG
+      8 England_Saxon.SG
+Wales: 
+     2 Wales_C.SG
+Scotland:
+      2 Scotland_BellBeaker
+      3 Scotland_C_EBA
+      2 Scotland_LBA
+      3 Scotland_MBA
+Germany:
+      1 Germany_BA.SG
+     30 Germany_BellBeaker
+      6 Germany_Lech_BellBeaker
+      8 Germany_CordedWare
+      4 Germany_EBA_Unetice
+     22 Germany_Lech_EBA
+      1 Germany_LBA_Halberstadt_published
+      2 Germany_Lech_MBA
+     24 Germany_EMedieval.SG
+      1 Germany_LRoman.SG
+Switzerland:
+     2 Switzerland_BellBeaker
+Denmark:
+     1 Denmark_BA.SG
+     1 Denmark_LBA.SG
+Italy:
+     3 Italy_North_BellBeaker
+      7 Italy_C_BA.SG
+      3 Italy_C.SG
+      1 Italy_North_Remedello_C.SG
+      1 Italy_North_Remedello_EBA.SG
+     45 Italy_Imperial.SG
+     11 Italy_Medieval_EarlyModern_oCentralEuropean.SG
+     17 Italy_Medieval_EarlyModern.SG
+     14 Italy_North_EarlyMedieval_Langobards
+      7 Italy_LA_oCentralEuropean.SG
+     16 Italy_LA.SG
+
+Testing one population:
+     11 Italy_Medieval_EarlyModern_oCentralEuropean.SG
+     17 Italy_Medieval_EarlyModern.SG
+     14 Italy_North_EarlyMedieval_Langobards
+     24 Germany_EMedieval.SG
+      3 Iberia_Medieval_published
+     23 Iceland_Pre_Christian.SG
+
+```{bash eval=FALSE}
+
+wrkDir="/sandbox/shares/mages/WGS_PREGO_Finistere_GAZEL/isabel/FR_aDNA_medieval/calling_HOA/mergeHOA"
+rightPops="/sandbox/shares/mages/WGS_PREGO_Finistere_GAZEL/isabel/REICH_march2020/fstats/qpAdm/onePop/right_pops.txt"
+cd $wrkDir
+if [ ! -d fstats/qpAdm ]; then
+mkdir fstats/qpAdm
+mkdir fstats/qpAdm/onePop
+else
+if [ ! -d fstats/qpAdm/onePop ]; then
+mkdir fstats/qpAdm/onePop
+fi
+fi 
+
+cd fstats/qpAdm/onePop
+
+inputName="fr_vk_1240kHO_full_sixMedieval"
+
+sourcePop=("FRMedieval")
+
+#sourcePop=("Italy_Medieval_EarlyModern_oCentralEuropean.SG" "Italy_Medieval_EarlyModern.SG" "Italy_North_EarlyMedieval_Langobards" "Germany_EMedieval.SG" "Iberia_Medieval_published" "Iceland_Pre_Christian.SG" "Vikings" "England_Saxon.SG" "England_LIA_ERoman.SG" "England_IA.SG" "Iberia_IA" "Iberia_Celtiberian")
+
+extraOUTGROUPS=("Anatolia_N" "Russia_EBA_Yamnaya_Samara")
+FRPOPS=("FINISTERE" "COTES-DARMOR" "MORBIHAN" "ILLE-ET-VILAINE" "VENDEE" "CENTRE" \
+"LIMOUSIN.POITOU-CHARENTES" "BASSE-NORMANDIE.HAUTE-NORMANDIE" \
+"NORD-PAS-DE-CALAIS.PICARDIE" "ALSACE.LORRAINE")
+
+#cp rightPops/right_pops.txt .
+
+#for newOut in ${extraOUTGROUPS[@]}; do
+#echo $newOut >> right_pops.txt
+#done
+
+for s in ${sourcePop[@]}; do
+
+cd $wrkDir/fstats/qpAdm/onePop
+mkdir $s/
+mkdir $s/output
+
+for target in ${FRPOPS[@]}; do
+echo $target > $s/$target.reference.pop
+echo $s >> $s/$target.reference.pop
+
+#(
+#echo "genotypename:    $wrkDir/SUBSET_finalPops/$inputName.geno"
+#echo "snpname:         $wrkDir/SUBSET_finalPops/$inputName.snp"
+#echo "indivname:       $wrkDir/SUBSET_finalPops/$inputName.bis.ind"
+#echo "popleft:         $wrkDir/fstats/qpAdm/onePop/$s/$target.reference.pop"
+#echo "popright:        $wrkDir/fstats/qpAdm/onePop/right_pops.txt"
+#echo "details: YES"
+#) > $s/par.qpAdm.OnePop.${s}.${target}.par
+
+#aDNA medieval
+(
+echo "genotypename:    $wrkDir/$inputName.geno"
+echo "snpname:         $wrkDir/$inputName.snp"
+echo "indivname:       $wrkDir/$inputName.ind"
+echo "popleft:         $wrkDir/fstats/qpAdm/onePop/$s/$target.reference.pop"
+echo "popright:        $rightPops"
+echo "details: YES"
+) > $s/par.qpAdm.OnePop.${s}.${target}.par
+
+/sandbox/users/alves-i/AdmixTools/bin/qpAdm \
+-p $wrkDir/fstats/qpAdm/onePop/${s}/par.qpAdm.OnePop.${s}.${target}.par > $wrkDir/fstats/qpAdm/onePop/$s/output/par.qpAdm.OnePop.${s}.${target}.log
+done
+done
+
+# find -type d ! -name 'rightPops' -exec rm -rf '{}' \;
+```
+
+## Plotting results for the population continuity (onePop) qpAdm
+
+```{bash eval=FALSE}
+wrkDir="/home/ialves/Dropbox/instDuThorax/REICH_SUPERDATASET_aDNA/fstats/qpAdm/onePop"
+cd $wrkDir
+if [ ! -d matrices/ ]; then
+echo "Creating folder to collect f4rank";
+mkdir matrices
+else 
+echo "Folder matrices already exists.";
+fi
+
+for dir in */; do 
+dir=${dir%/}; 
+echo "Collecting data from: $dir"; 
+for file in $dir/output/*.log;
+do 
+targetPop=`echo $file | sed "s/.*$dir.\(.*\).log/\1/"`
+pval=`cat $file | grep f4rank | sed -n 2p | awk '{print $14}'`
+echo "Fetching f4rank for target population: $targetPop";
+echo "Model p-value: $pval";
+echo ""
+echo "$targetPop $pval" >> matrices/$dir.f4rank;
+done
+done
+
+```
+
+```{r echo=TRUE}
+library(RColorBrewer)
+wrkDir="/home/ialves/Dropbox/instDuThorax/REICH_SUPERDATASET_aDNA/fstats/qpAdm/onePop/matrices"
+setwd(wrkDir)
+
+FRPOPS=c("FINISTERE", "COTES-DARMOR", "MORBIHAN", "ILLE-ET-VILAINE", 
+         "BASSE-NORMANDIE.HAUTE-NORMANDIE", "NORD-PAS-DE-CALAIS.PICARDIE", 
+         "ALSACE.LORRAINE", "VENDEE", "CENTRE", "LIMOUSIN.POITOU-CHARENTES")
+
+publishNameFR <- c("FINISTERE", "COTES-DARMOR", "MORBIHAN", "ILLE-ET-VILAINE", 
+                   "NORMANDIE", "HAUTES-DE-FRANCE", "GRAND-EST", "VENDEE", "CENTRE", 
+                   "NOUVELLE-AQUITAINE")
+
+
+fileList <- list.files(path = wrkDir, pattern = "*.f4rank", full.names = T)
+coloraPops <- brewer.pal(11, "Set3")
+#1 IA, 2 Saxon, 3 Medieval, 4 Celtiberian, 5 pre-Christian, 6 Vikings
+pchType <- c(1,2,3,4,1,3,5,3,3,3,6)
+
+png(filename = paste0(wrkDir, "/log10_modelPValue.png"), width = 16, 
+    height = 4, units = 'in', res = 300)
+par(mar=c(4,4,1,1))
+layout(matrix(c(1,2), ncol = 2, byrow = T), widths = c(3,2))
+f4rank_l <- list()
+for(fileNb in 1:length(fileList)){
+  openF <- read.table(fileList[fileNb], header = F)
+  openF <- openF[match(FRPOPS,openF[,1]),]
+  
+  aPOP <- unlist(strsplit(unlist(strsplit(fileList[fileNb], split = "/"))[length(unlist(strsplit(fileList[fileNb], split = "/")))], split="\\."))[1]
+  
+  f4rank_l[[aPOP]] <- as.vector(openF[,2])
+  names(f4rank_l[[aPOP]]) <-  as.vector(openF[,1]) 
+  if(fileNb == 1) {
+    plot(log10(f4rank_l[[aPOP]]), type = "b", col=coloraPops[fileNb], ylim=c(-200,0),
+         xlim = c(1,16), ylab = "log10(p-Value)", xaxt='n', xlab="", pch=pchType[fileNb], lwd=2)
+  } else {
+    lines(log10(f4rank_l[[aPOP]]), type = "b", col=coloraPops[fileNb], pch=pchType[fileNb], lwd=2)
+  }
+}
+axis(1, at=1:10, labels = substr(publishNameFR, start = 1, stop = 3))
+abline(h=log10(0.05), col="grey55",lwd=2)
+legend("right", legend=names(f4rank_l), pch = pchType, lty = 1, col = coloraPops, 
+       bty = "n", cex = 0.8, pt.cex=1.2, pt.lwd = 1.2, lwd = 1.5)
+
+f4rank_l <- list()
+for(fileNb in 1:length(fileList)){
+  openF <- read.table(fileList[fileNb], header = F)
+  openF <- openF[match(FRPOPS,openF[,1]),]
+  
+  aPOP <- unlist(strsplit(unlist(strsplit(fileList[fileNb], split = "/"))[length(unlist(strsplit(fileList[fileNb], split = "/")))], split="\\."))[1]
+  
+  f4rank_l[[aPOP]] <- as.vector(openF[,2])
+  names(f4rank_l[[aPOP]]) <-  as.vector(openF[,1]) 
+  if(fileNb == 1) {
+    plot(log10(f4rank_l[[aPOP]]), type = "b", col=coloraPops[fileNb], ylim=c(-10,0), ylab = "log10(p-Value)", xaxt='n',
+         xlab="", pch=pchType[fileNb], lwd=2)
+  } else {
+    lines(log10(f4rank_l[[aPOP]]), type = "b", col=coloraPops[fileNb], pch=pchType[fileNb], lwd=2)
+  }
+}
+axis(1, at=1:10, labels = substr(publishNameFR, start = 1, stop = 3))
+abline(h=log10(0.05), col="grey55", lwd=2)
+#legend("right", legend=names(f4rank_l), pch = pchType, lty = 1, col = coloraPops, bty = "n", cex = 1, pt.cex=1.2, pt.lwd = 1.2)
+dev.off()
+
+
+```
+
+# Adding Marinna's WHG to the dataset
+
+This step required to re-do the initial filtering by including WHG samples analysed by Marinna's. Below is the set of samples overlapping between Mathieson's dataset (and analysed by Marinna) and Reich's dataset 2020 and not present in the /sandbox/shares/mages/WGS_PREGO_Finistere_GAZEL/isabel/REICH_march2020/SUBSET_finalPops/fr_vk_1240kHO_full.bis.ind. They were sent to me by Christian:
+
+ID  | Source | DateBP | Culture | Country | Latitude |
+----|--------|--------|---------|---------|----------|
+BerryAuBac | MathiesonNature2018 | 7245 | WHG | France | 49.24 |
+Bichon.SG | JonesNatureCommunications2015 | 13665 | Bichon | Switzerland | 47.1 |
+Falkenstein | MathiesonNature2018 | 9200 | WHG | Germany | 48.06 |
+I1875 | MathiesonNature2018 | 9118 | WHG | Croatia | 42.97 |
+I2158 | MathiesonNature2018 | 14275 | WHG | Italy | 37.93 |
+I4081 | MathiesonNature2018 | 9335 | Iron_Gates_HG | Romania | 44.52 |
+I4582 | MathiesonNature2018 | 8697 | Iron_Gates_HG | Romania | 44.52 |
+I4607 | MathiesonNature2018 | 8940 | Iron_Gates_HG | Romania | 44.63 |
+I4655 | MathiesonNature2018 | 8765 | Iron_Gates_HG | Romania | 44.63 |
+I4657 | MathiesonNature2018 | 11465 | Iron_Gates_HG | Serbia | 44.53 | 
+I4660 | MathiesonNature2018 | 9713 | Iron_Gates_HG | Serbia | 44.53 |
+I4870 | MathiesonNature2018 | 8740 | Iron_Gates_HG | Serbia | 44.53 |
+I4871 | MathiesonNature2018 | 8450 | Iron_Gates_HG | Serbia | 44.53 |
+I4872 | MathiesonNature2018 | 8450 | Iron_Gates_HG | Serbia | 44.53 |
+I4873 | MathiesonNature2018 | 7872 | Iron_Gates_HG | Serbia | 44.53 |
+I4874 | MathiesonNature2018 | 8506 | Iron_Gates_HG | Serbia | 44.53 |
+I4875 | MathiesonNature2018 | 8458 | Iron_Gates_HG | Serbia | 44.53 |
+I4876 | MathiesonNature2018 | 8455 | Iron_Gates_HG | Serbia | 44.53 |
+I4877 | MathiesonNature2018 | 8505 | Iron_Gates_HG | Serbia | 44.53 |
+I4878 | MathiesonNature2018 | 7803 | Iron_Gates_HG | Serbia | 44.53 |
+I4880 | MathiesonNature2018 | 7813 | Iron_Gates_HG | Serbia | 44.53 |
+I4881 | MathiesonNature2018 | 8363 | Iron_Gates_HG | Serbia | 44.53 | 
+I4882 | MathiesonNature2018 | 8000 | Iron_Gates_HG_brother_I4880 | Serbia | 44.53 |
+I4915 | MathiesonNature2018 | 8115 | Iron_Gates_HG | Serbia | 44.64 |
+I4916 | MathiesonNature2018 | 8763 | Iron_Gates_HG | Serbia | 44.64 |
+I5233 | MathiesonNature2018 | 8001 | Iron_Gates_HG | Serbia | 44.6 |
+I5234 | MathiesonNature2018 | 9800 | Iron_Gates_HG | Serbia | 44.6 |
+I5235 | MathiesonNature2018 | 10835 | Iron_Gates_HG | Serbia | 44.6 |
+I5236 | MathiesonNature2018 | 10008 | Iron_Gates_HG | Serbia | 44.6 |
+I5237 | MathiesonNature2018 | 9800 | Iron_Gates_HG | Serbia | 44.6 |
+I5238 | MathiesonNature2018 | 9993 | Iron_Gates_HG | Serbia | 44.6 |
+I5239 | MathiesonNature2018 | 10333 | Iron_Gates_HG | Serbia  | 44.6 |
+I5240 | MathiesonNature2018 | 10805 | Iron_Gates_HG | Serbia | 44.6 |
+I5241 | MathiesonNature2018 | 11196 | Iron_Gates_HG_daughter_I5236 | Serbia | 44.6 |
+I5242 | MathiesonNature2018 | 10530 | Iron_Gates_HG | Serbia | 44.6 |
+I5244 | MathiesonNature2018 | 10785 | Iron_Gates_HG | Serbia | 44.6 |
+I5401 | MathiesonNature2018 | 8838 | Iron_Gates_HG | Serbia | 44.64 |
+I5402 | MathiesonNature2018 | 8156 | Iron_Gates_HG | Serbia | 44.64 |
+I5407 | MathiesonNature2018 | 9800 | Lepenski_Vir | Serbia | 44.55 |
+I5409 | MathiesonNature2018 | 9800 | Iron_Gates_HG | Serbia | 44.6 |
+I5411 | MathiesonNature2018 | 8600 | Iron_Gates_HG | Romania | 44.63 |
+I5771 | MathiesonNature2018 | 8325 | Iron_Gates_HG | Serbia | 44.53 |
+I5772 | MathiesonNature2018 | 8450 | Iron_Gates_HG | Serbia | 44.53 |
+KO1 | GambaNatureCommunications2014 | 7660 | Koros_Hungary_EN_HG_published.SG | Hungary | 47.56 |
+LaBrana1 | OlaldeNature2014 | 7815 | Iberia_HG_published.SG | Spain | 42.91 |
+Loschbour_published.DG | LazaridisNature2014 | 8050 | Loschbour_published.DG | Luxembourg | 49.81 |
+I4914 | MathiesonNature2018 | 8123 | Iron_Gates_HG | Serbia | 44.64 |
+Rochedane | MathiesonNature2018 | 12960 | WHG | France | 47.21 |
+Iboussieres25-1 | MathiesonNature2018 | 11725 | WHG | France  | 44.29 |
+I5773 | MathiesonNature2018 | 10040 | Iron_Gates_HG | Serbia  | 44.53 |
+Iboussieres31-2 | MathiesonNature2018 | 11725 | WHG | France  | 44.29 |
+I4971 | LipsonNature2017 | 7592 | Koros_EN_HG | Hungary | 47.56 |
+I4917 | MathiesonNature2018 | 8058 | Iron_Gates_HG | Serbia | 44.64 |
+I5436 | MathiesonNature2018 | 9025 | Iron_Gates_HG | Romania | 44.629711 |
+
+From this dataset I removed the related samples:
+
+ID  | Source | DateBP | Culture | Country | Latitude |
+----|--------|--------|---------|---------|----------|
+I4882 | MathiesonNature2018 | 8000 | Iron_Gates_HG_brother_I4880 | Serbia | 44.53 |
+I5241 | MathiesonNature2018 | 11196 | Iron_Gates_HG_daughter_I5236 | Serbia | 44.6 |
+
+Files with the samples sent by Christian and the clean dataset are hosted locally:
+
+~/documents/julia/WHG_toAdd.txt 
+~/documents/julia/WHG_toAdd_clean.txt (not related)
+
+There are two samples:
+
+Falkenstein M Germany_Falkenstein
+I4971 M Hungary_EN_HG_Koros
+
+Already present in the /sandbox/shares/mages/WGS_PREGO_Finistere_GAZEL/isabel/REICH_march2020/SUBSET_finalPops/fr_vk_1240kHO_full.bis.ind file. 
+
+The fasted way to generate a new .ind file containing all the samples in the fr_vk_1240kHO_full.bis.ind and the WHG analysed by Marinna is extract the WHG from the Original dataset (/sandbox/shares/mages/WGS_PREGO_Finistere_GAZEL/isabel/REICH_march2020/ORIGINAL/v42.4.1240K_HO.ind) and merge it with the fr_vk_1240kHO_full.bis.ind. To do so, I created a v42.4.1240K_HO.ind whose third column contains Ignore and replaced by the population name in the case of the 51 WHG samples contained in /sandbox/shares/mages/WGS_PREGO_Finistere_GAZEL/isabel/REICH_march2020/WHG_ids_toExtract.txt. 
+
+```{bash eval=FALSE}
+#locally 
+#create a file only with the ind IDs present in the .anno file for the non-related samples in the file ../../documents/julia/WHG_toAdd_clean.txt
+cd /home/ialves/Dropbox/instDuThorax/REICH_SUPERDATASET_aDNA/SAMPLES
+cat ../../documents/julia/WHG_toAdd_clean.txt | sed 1d | awk '{print $1}' | while read ind; do echo "Checking ind: $ind"; echo "";indPres=`grep $ind v42.4.1240K_HO.anno`; nbLines=`grep $ind v42.4.1240K_HO.anno | wc -l`; if [ -z "$indPres" ]; then echo "Sample $ind not found"; else echo "Sample $ind found"; echo "There are $nbLines samples with this name"; if [ $nbLines -eq 1 ]; then grep $'\t'$ind v42.4.1240K_HO.anno | awk '{print $2}' >> WHG_ids_toExtract_tmp.txt; elif [ $nbLines -eq 2 ]; then grep $'\t'$ind v42.4.1240K_HO.anno | grep -v "published" | awk '{print $2}' >> WHG_ids_toExtract_tmp.txt; fi; fi; echo ""; echo ""; done
+
+
+#remove the two samples - Falkenstein and I4971 - from the WHG_ids_toExtract_tmp.txt
+grep -v Falkenstein /sandbox/shares/mages/WGS_PREGO_Finistere_GAZEL/isabel/REICH_march2020/WHG_ids_toExtract_tmp.txt | grep -v I4971 > /sandbox/shares/mages/WGS_PREGO_Finistere_GAZEL/isabel/REICH_march2020/WHG_ids_toExtract.txt
+
+rm /sandbox/shares/mages/WGS_PREGO_Finistere_GAZEL/isabel/REICH_march2020/WHG_ids_toExtract_tmp.txt
+
+cd /sandbox/shares/mages/WGS_PREGO_Finistere_GAZEL/isabel/REICH_march2020/
+cp ORIGINAL/v42.4.1240K_HO.ind ORIGINAL/v42.4.1240K_HO.allIgnore_tmp.ind
+cat ORIGINAL/v42.4.1240K_HO.allIgnore_tmp.ind | awk '{print $1,$2,"Ignore"}' > ORIGINAL/v42.4.1240K_HO.allIgnore_tmp_tmp.ind
+
+cat WHG_ids_toExtract.txt | while read tag; do echo "Retrieving $tag"; popTag=`grep $tag$' ' ORIGINAL/v42.4.1240K_HO.ind | awk '{print $3}'`; sed -i "/$tag / s/Ignore/$popTag/g" ORIGINAL/v42.4.1240K_HO.allIgnore_tmp_tmp.ind; echo ""; done
+
+mv ORIGINAL/v42.4.1240K_HO.allIgnore_tmp_tmp.ind ORIGINAL/v42.4.1240K_HO.allIgnore.txt
+rm ORIGINAL/*tmp*
+
+wrkDir="/sandbox/shares/mages/WGS_PREGO_Finistere_GAZEL/isabel/REICH_march2020"
+inFname="v42.4.1240K_HO"
+outFname="WHG_ReichMarch2020"
+
+(
+echo "genotypename:    $wrkDir/ORIGINAL/$inFname.geno"   
+echo "snpname:         $wrkDir/ORIGINAL/$inFname.snp"
+echo "indivname:       $wrkDir/ORIGINAL/$inFname.allIgnore.ind"
+echo "outputformat:    EIGENSTRAT"
+echo "genotypeoutname: $wrkDir/SUBSET_finalPops/$outFname.geno"
+echo "snpoutname:      $wrkDir/SUBSET_finalPops/$outFname.snp"
+echo "indivoutname:    $wrkDir/SUBSET_finalPops/$outFname.ind"
+echo "familynames:     NO"
+) > $wrkDir/convert.1240KHO.WHG.par
+
+/sandbox/users/alves-i/EIG-6.1.4/bin/convertf \
+-p $wrkDir/convert.1240KHO.WHG.par > $wrkDir/convert.1240KHO.WHG.log
+
+mv $wrkDir/SUBSET_finalPops/$outFname.snp $wrkDir/SUBSET_finalPops/$outFname.rs.snp
+cat $wrkDir/SUBSET_finalPops/$outFname.rs.snp | awk '{OFS=" "; print $2":"$4,$2,$3,$4,$5,$6}' > $wrkDir/SUBSET_finalPops/$outFname.snp
+
+#merge dataset generated initially with the one containing only WHG from Marinna's analyses
+dirFullds="/sandbox/shares/mages/WGS_PREGO_Finistere_GAZEL/isabel/REICH_march2020/SUBSET_finalPops"
+fullDSFile="fr_vk_1240kHO_full"
+
+dirWHG="/sandbox/shares/mages/WGS_PREGO_Finistere_GAZEL/isabel/REICH_march2020/SUBSET_finalPops"
+whgFile="WHG_ReichMarch2020"
+
+
+(
+echo "geno1:           $dirFullds/$fullDSFile.geno"
+echo "snp1:            $dirFullds/$fullDSFile.snp"
+echo "ind1:            $dirFullds/$fullDSFile.bis.ind"
+echo "geno2:           $dirWHG/$whgFile.geno"     
+echo "snp2:            $dirWHG/$whgFile.snp"
+echo "ind2:            $dirWHG/$whgFile.ind"
+echo "genooutfilename: $dirFullds/fr_vk_1240kHO_WHG.geno"
+echo "snpoutfilename:  $dirFullds/fr_vk_1240kHO_WHG.snp"
+echo "indoutfilename:  $dirFullds/fr_vk_1240kHO_WHG.ind"
+echo "outputformat:    EIGENSTRAT"
+echo "docheck: YES"
+echo "strandcheck: YES"
+) > $dirFullds/input.MERGEIT.EIGENSTRAT.WHG.par
+
+/sandbox/users/alves-i/EIG-6.1.4/bin/mergeit -p $dirFullds/input.MERGEIT.EIGENSTRAT.WHG.par > $dirFullds/input.MERGEIT.EIGENSTRAT.WHG.log
+
+
+```
+
+# Adding Marinna's SP (those not included in fr_vk_1240kHO_full.bis.ind) to the dataset
+
+Besides adding a larger number of WHG to the fr_vk_1240kHO_full.bis.ind we also want to include some more steppe samples (SP ancestry > .90) analysed my Marinna's to a new dataset. So, we start with the fr_vk_1240kHO_WHG.ind file. 
+
+First thing is to find the SP samples that are present in:
+
+/home/ialves/Dropbox/instDuThorax/documents/julia/annotation_ancestry0.90.anno
+
+and not in /home/ialves/Dropbox/instDuThorax/REICH_SUPERDATASET_aDNA/PREGO/qpAdm/SAMPLES/fr_vk_1240kHO_WHG.ind.
+
+
+```{r echo=TRUE}
+wrkDir <- "/home/ialves/Dropbox/instDuThorax/documents/julia"
+#name of the annotation file
+fileNameAnn <- "Informations_Ancient_People.anno"
+#name of the .ind file
+fileNameInd <- "fr_vk_1240kHO_full.bis.ind"
+
+#open the annotation file
+table_Anno <- read.table(paste0(wrkDir, "/", fileNameAnn), header = T, sep = "\t")
+#open the ind file
+table_Ind <- read.table(paste0(wrkDir, "/", fileNameInd), header = F)
+
+#shows the names of the columns
+names(table_Anno)
+#shows how many samples there are with different annotation
+table(table_Anno$Assignment)
+
+#create a new table with containing only Steppe Pastoralists with an ancestry proprotion larger than 0.9
+annoFiltered_SP <- table_Anno[which(table_Anno$Assignment == "SP" & table_Anno$YAM > .9),] 
+#nb of samples
+nrow(annoFiltered_SP)
+
+SPsamplesToInclude <- as.character(annoFiltered_SP[match(setdiff(annoFiltered_SP$ID, table_Ind[,1]), annoFiltered_SP$ID),1])
+nrow(annoFiltered_SP)
+
+write.table(matrix(SPsamplesToInclude), file=paste0(wrkDir, "/SP_to_include.txt"), quote = F, row.names = F, col.names = F)
+
+```
+
+From the file /home/ialves/Dropbox/instDuThorax/documents/julia/SP_to_include.txt we removed the I1541 and RISE507.508.merge: /home/ialves/Dropbox/instDuThorax/documents/julia/SP_to_include_clean.txt
+
+```{bash eval=FALSE}
+#locally 
+#create a file only with the ind IDs present in the .anno file for the non-related samples in the file ../../documents/julia/WHG_toAdd_clean.txt
+cd /home/ialves/Dropbox/instDuThorax/REICH_SUPERDATASET_aDNA/SAMPLES
+cat ../../documents/julia/SP_to_include_clean.txt | while read ind; do echo "Checking ind: $ind"; echo "";indPres=`grep $ind v42.4.1240K_HO.anno`; nbLines=`grep $ind v42.4.1240K_HO.anno | wc -l`; if [ -z "$indPres" ]; then echo "Sample $ind not found"; else echo "Sample $ind found"; echo "There are $nbLines samples with this name"; if [ $nbLines -eq 1 ]; then grep $'\t'$ind v42.4.1240K_HO.anno | awk '{print $2}' >> SP_ids_toExtract_tmp.txt; elif [ $nbLines -eq 2 ]; then grep $'\t'$ind v42.4.1240K_HO.anno | grep -v "published" | awk '{print $2}' >> SP_ids_toExtract_tmp.txt; fi; fi; echo ""; echo ""; done
+
+mv SP_ids_toExtract_tmp.txt SP_ids_toExtract.txt
+#removed Latvia_LN1.SG as this was a duplicated sample equal to the I4629
+scp SP_ids_toExtract.txt alves-i@bird2login.univ-nantes.fr:/sandbox/shares/mages/WGS_PREGO_Finistere_GAZEL/isabel/REICH_march2020 
+
+#on BiRD
+cd /sandbox/shares/mages/WGS_PREGO_Finistere_GAZEL/isabel/REICH_march2020/
+cp ORIGINAL/v42.4.1240K_HO.ind ORIGINAL/v42.4.1240K_HO.allIgnore_tmp.ind
+cat ORIGINAL/v42.4.1240K_HO.allIgnore_tmp.ind | awk '{print $1,$2,"Ignore"}' > ORIGINAL/v42.4.1240K_HO.allIgnore_tmp_tmp.ind
+
+cat SP_ids_toExtract.txt | while read tag; do echo "Retrieving $tag"; popTag=`grep $tag$' ' ORIGINAL/v42.4.1240K_HO.ind | awk '{print $3}'`; sed -i "/$tag / s/Ignore/$popTag/g" ORIGINAL/v42.4.1240K_HO.allIgnore_tmp_tmp.ind; echo ""; done
+
+mv ORIGINAL/v42.4.1240K_HO.allIgnore_tmp_tmp.ind ORIGINAL/v42.4.1240K_HO.allIgnore.ind
+rm ORIGINAL/*tmp*
+
+wrkDir="/sandbox/shares/mages/WGS_PREGO_Finistere_GAZEL/isabel/REICH_march2020"
+inFname="v42.4.1240K_HO"
+outFname="SP_ReichMarch2020"
+
+(
+echo "genotypename:    $wrkDir/ORIGINAL/$inFname.geno"   
+echo "snpname:         $wrkDir/ORIGINAL/$inFname.snp"
+echo "indivname:       $wrkDir/ORIGINAL/$inFname.allIgnore.ind"
+echo "outputformat:    EIGENSTRAT"
+echo "genotypeoutname: $wrkDir/SUBSET_finalPops/$outFname.geno"
+echo "snpoutname:      $wrkDir/SUBSET_finalPops/$outFname.snp"
+echo "indivoutname:    $wrkDir/SUBSET_finalPops/$outFname.ind"
+echo "familynames:     NO"
+) > $wrkDir/convert.1240KHO.SP.par
+
+/sandbox/users/alves-i/EIG-6.1.4/bin/convertf \
+-p $wrkDir/convert.1240KHO.SP.par > $wrkDir/convert.1240KHO.SP.log
+
+mv $wrkDir/SUBSET_finalPops/$outFname.snp $wrkDir/SUBSET_finalPops/$outFname.rs.snp
+cat $wrkDir/SUBSET_finalPops/$outFname.rs.snp | awk '{OFS=" "; print $2":"$4,$2,$3,$4,$5,$6}' > $wrkDir/SUBSET_finalPops/$outFname.snp
+
+#merge dataset generated initially with the one containing only WHG from Marinna's analyses
+dirFullds="/sandbox/shares/mages/WGS_PREGO_Finistere_GAZEL/isabel/REICH_march2020/SUBSET_finalPops"
+fullDSFile="fr_vk_1240kHO_WHG"
+
+dirWHG="/sandbox/shares/mages/WGS_PREGO_Finistere_GAZEL/isabel/REICH_march2020/SUBSET_finalPops"
+whgFile="SP_ReichMarch2020"
+
+(
+echo "geno1:           $dirFullds/$fullDSFile.geno"
+echo "snp1:            $dirFullds/$fullDSFile.snp"
+echo "ind1:            $dirFullds/$fullDSFile.ind"
+echo "geno2:           $dirWHG/$whgFile.geno"     
+echo "snp2:            $dirWHG/$whgFile.snp"
+echo "ind2:            $dirWHG/$whgFile.ind"
+echo "genooutfilename: $dirFullds/fr_vk_1240kHO_WHG_SP.geno"
+echo "snpoutfilename:  $dirFullds/fr_vk_1240kHO_WHG_SP.snp"
+echo "indoutfilename:  $dirFullds/fr_vk_1240kHO_WHG_SP.ind"
+echo "outputformat:    EIGENSTRAT"
+echo "docheck: YES"
+echo "strandcheck: YES"
+) > $dirFullds/input.MERGEIT.EIGENSTRAT.WHG_SP.par
+
+/sandbox/users/alves-i/EIG-6.1.4/bin/mergeit -p $dirFullds/input.MERGEIT.EIGENSTRAT.WHG_SP.par > $dirFullds/input.MERGEIT.EIGENSTRAT.WHG_SP.log
+
+#locally
+
+scp alves-i@bird2login.univ-nantes.fr:/sandbox/shares/mages/WGS_PREGO_Finistere_GAZEL/isabel/REICH_march2020/SUBSET_finalPops/fr_vk_1240kHO_WHG_SP.ind .
+
+```
+# Change .ind to include SP, WHG and EF labels plus selecting only 25 ind for each French sample
+
+
+```{r echo=TRUE}
+## importing libraries
+
+require(stringr)
+
+#########################################
+##
+## Selection of samples from Mathienson et al 2015
+## as followed by Marinna
+##
+########################################
+
+#folder where the annotation file is
+# The folder name needs to be changed according to where one stores the file.
+# to find path one needs to open the command line go into the folder where the files are 
+# and where we want to generate new files and do : pwd 
+# use the result to replace the path below
+
+wrkDir <- "/home/ialves/Dropbox/instDuThorax/REICH_SUPERDATASET_aDNA/PREGO/qpAdm/SAMPLES"
+#name of the annotation file
+fileNameAnn <- "Informations_Ancient_People.anno"
+#name of the .ind file
+fileNameInd <- "fr_vk_1240kHO_WHG_SP.ind"
+
+#open the annotation file
+table_Anno <- read.table(paste0(wrkDir, "/", fileNameAnn), header = T, sep = "\t")
+#open the ind file
+table_Ind <- read.table(paste0(wrkDir, "/", fileNameInd), header = F)
+
+#shows the names of the columns
+names(table_Anno)
+#shows how many samples there are with different annotation
+table(table_Anno$Assignment)
+
+#create a new table with containing only Early farmers with an ancestry proprotion larger than 0.9
+annoFiltered_EF <- table_Anno[which(table_Anno$Assignment == "EF" & table_Anno$ANA > .9),] 
+#nb of samples
+nrow(annoFiltered_EF)
+
+#create a new table with containing only Hunter-gatherers with an ancestry proprotion larger than 0.9
+#here the column selected is related with the western hunter gatherer, which is the ancestry we are interested in
+annoFiltered_HG <- table_Anno[which(table_Anno$Assignment == "HG" & table_Anno$WHG > .9),] 
+#nb of samples
+nrow(annoFiltered_HG)
+
+#create a new table with containing only Steppe Pastoralists with an ancestry proprotion larger than 0.9
+annoFiltered_SP <- table_Anno[which(table_Anno$Assignment == "SP" & table_Anno$YAM > .9),] 
+#nb of samples
+nrow(annoFiltered_SP)
+
+nrow(annoFiltered_SP)+nrow(annoFiltered_HG)+nrow(annoFiltered_EF)
+
+#create final table containing all EF, SP and WHG with a proportion of ancestry larger than .90 from each of the populations
+newTableAnno <- rbind(annoFiltered_EF, annoFiltered_SP,annoFiltered_HG)
+
+write.table(newTableAnno, file=paste0(wrkDir, "/annotation_ancestry0.90.anno"), quote = F, col.names = T, sep = "\t", row.names = F)
+###---------------------
+
+
+###################################
+##
+## Match the IDs with the ones 
+## in the .ind file, which contains 
+## the individuals encompassed and in the SAME ORDER
+## as the genotype file (.geno)
+##
+################################### 
+
+#get the individual IDs that are not shared between the smaller annotation file and the .ind file
+SP_extraIDs <- c("I0231_published", "I0371_published", "I3141_published")
+overlappingIDs <- intersect(table_Ind[,1], c(as.character(newTableAnno$ID), SP_extraIDs))
+
+#ids in the annot file with proportion > .9 that are not found in the .ind file
+notFoundIDs <- setdiff(newTableAnno$ID, overlappingIDs)
+
+#below gives you the number of samples per ancient population
+table(newTableAnno[match(overlappingIDs, newTableAnno$ID),14])
+
+write.table(matrix(notFoundIDs), file = paste0(wrkDir, "/IDs_notFound.txt"), quote = F, row.names = F, col.names = F)
+
+#creating a vector with pop names
+popLabels <- as.character(table_Ind[,3])
+
+#replacing labels
+popLabels[match(overlappingIDs, table_Ind[,1])] <- as.character(newTableAnno[match(overlappingIDs, newTableAnno$ID),14])
+#there will be three NA because of the samples above SP_extraIDs
+#we need to replace NA
+popLabels[is.na(popLabels)] <- "SP"
+
+#creating new table
+newIndTable <- cbind(table_Ind[,1:2], popLabels)
+###---------------------
+
+###################################
+##
+## replace French IDs
+## based on the fineSTRUCTURE 
+## groups
+## 
+##
+################################### 
+
+fileNameFINEclusters <- "FR_MS_PS_POBI_HGDPMbu_Basq_Orc_Sar.commonSNPs.flipped.hwe.maf0.05.fam"
+
+openFINEclusters <- read.table(paste0(wrkDir, "/", fileNameFINEclusters), header = F)
+
+#transf IDs such that IDs in the .fam file are in the same format as the ones in the .ind file
+transfIDs_PREGO <- str_subset(sapply(as.character(openFINEclusters[,2]), function(x) { unlist(strsplit(x, split = ":"))[2]}), pattern = c("PREGO"))
+transfIDs_FINI <- str_subset(sapply(as.character(openFINEclusters[,2]), function(x) { unlist(strsplit(x, split = ":"))[2]}), pattern = c("FINISTERE"))
+transfIDs_GAZEL <- str_subset(sapply(as.character(openFINEclusters[,2]), function(x) { unlist(strsplit(x, split = ":"))[2]}), pattern = c("GAZEL"))
+#putting the samples all together
+allFRsamples <- c(transfIDs_PREGO, transfIDs_FINI, transfIDs_GAZEL)
+
+#the underscore was replaced by the colon
+allFR_sepReplaced <- str_replace(allFRsamples, "_", ":")
+
+#just keep the IDs in the vector  
+fam_indIDs <- as.character(openFINEclusters[,2])
+#change the french IDs
+fam_indIDs[match(allFRsamples, sapply(as.character(openFINEclusters[,2]), function(x) { unlist(strsplit(x, split = ":"))[2]}))] <- allFR_sepReplaced
+
+#generate a new Fam file
+newFamFile <- cbind(openFINEclusters[,1], fam_indIDs, openFINEclusters[,3:6])
+
+#creating an empty list
+indFile_clusters <- list()
+
+# the loop below goes along the .ind file,
+# checks the individual ID and if it is a French ID 
+# and it changes the population label in the .ind file according 
+# to the information on the .fam file
+# like this we keep the same samples as the ones used with the modern DNA analysis
+# and grouped as clusters in northwestern France
+
+for(sample in 1:nrow(newIndTable)) {
+  
+  #sample <- 3000
+  if(is.element(as.character(newIndTable[sample,1]), allFR_sepReplaced)) {
+    
+    if(newFamFile[which(newFamFile[,2] == as.character(newIndTable[sample,1])),6] == "-9") {
+    
+      indFile_clusters[[sample]] <- c(as.character(unlist(newIndTable[sample,1:2])), "FranceUnknown")
+    } else {
+      indFile_clusters[[sample]] <- c(as.character(unlist(newIndTable[sample,1:2])),as.character(newFamFile[which(newFamFile[,2] == as.character(newIndTable[sample,1])),6]))
+    }
+  } else {
+    indFile_clusters[[sample]] <- as.character(unlist(newIndTable[sample,]))
+  }
+  
+}
+#merge the element of the list
+finalIndFile <- do.call(rbind, indFile_clusters, quote = F)
+
+#downsampling the Vikings and the Spanish
+popToDownSample <- c("Vikings", "Spanish")
+for(pop in popToDownSample){
+  #pop <- popToDownSample[1]
+  nbSamples <- length(which(finalIndFile[,3] == pop))
+  if(pop == "Vikings") {
+    finalIndFile[sample(which(finalIndFile[,3] == pop), nbSamples-25),3] <- "VikingsUnknown"
+  } else if(pop == "Spanish") {
+    finalIndFile[sample(which(finalIndFile[,3] == pop), nbSamples-25),3] <- "SpanishUnknown"
+  }
+}
+
+#save the new .ind file 
+write.table(finalIndFile, file=paste0(wrkDir, "/fr_vk_1240kHO_SP_WHG.qpAdm.ss25.ind"), quote = F, row.names = F, col.names = F, sep = " ")
+
+
+```
+## Compute f3-Mbuti; Bell_Beaker; Western Eur
+
+Below is the computation of outgroup f3 statistics between pairs of populations including a Bell Beaker population and a modern European. French samples are annotated accoring to the western France clustering. Vikings and the Spanish are downsampled. 
+
+```{bash eval=FALSE}
+wrkDir="/sandbox/shares/mages/WGS_PREGO_Finistere_GAZEL/isabel/REICH_march2020"
+cd $wrkDir
+
+mkdir fstats/f3/PREGO
+mkdir fstats/f3/PREGO/input
+mkdir fstats/f3/PREGO/output
+
+inputName="fr_vk_1240kHO_WHG_SP"
+
+#generating list of comparisons
+FRPOPS=("cluster1" "cluster2" "cluster3" "CENTRE" \
+"LIMOUSIN.POITOU-CHARENTES" "BASSE-NORMANDIE.HAUTE-NORMANDIE" \
+"NORD-PAS-DE-CALAIS.PICARDIE" "ALSACE.LORRAINE")
+OTHERMODERN=("Basque" "English" "Scottish" "Sardinian" "Greek" \
+"Hungarian" "Icelandic" "Italian_North" "Italian_South" "Norwegian" \
+"Orcadian" "Spanish_North" "Spanish" )
+
+outgroup="Mbuti"
+
+grep BellBeaker SUBSET_finalPops/fr_vk_1240kHO_WHG_SP.qpAdm.ss25.ind | awk '{print $3}' | sort | uniq | sed 1d | while read cpop; 
+do
+  cd $wrkDir
+  EXCLUDESTR=($outgroup $cpop)
+  POPARRAY=( "${FRPOPS[@]}" "${OTHERMODERN[@]}" )
+  for pop in ${POPARRAY[@]}; do 
+	  echo "$cpop $pop $outgroup" >> fstats/f3/PREGO/input/list_f3outgroup_${outgroup}_${cpop}.txt; 
+	  #generating par file 
+
+  done; 
+  (
+  echo "genotypename:    $wrkDir/SUBSET_finalPops/$inputName.geno"
+  echo "snpname:         $wrkDir/SUBSET_finalPops/$inputName.snp"
+  echo "indivname:       $wrkDir/SUBSET_finalPops/$inputName.qpAdm.ss25.ind"
+  echo "popfilename:     $wrkDir/fstats/f3/PREGO/input/list_f3outgroup_${outgroup}_${cpop}.txt"
+  ) > fstats/f3/PREGO/input/par.f3testOutgroup_${outgroup}_${cpop}_sour2.par
+
+  cd 
+  AdmixTools/bin/qp3Pop \
+  -p $wrkDir/fstats/f3/PREGO/input/par.f3testOutgroup_${outgroup}_${cpop}_sour2.par \
+  > $wrkDir/fstats/f3/PREGO/output/f3Out_${cpop}.log
+done
+
+#Vikings
+cpop="Vikings"
+cd $wrkDir
+EXCLUDESTR=($outgroup $cpop)
+POPARRAY=( "${FRPOPS[@]}" "${OTHERMODERN[@]}" )
+for pop in ${POPARRAY[@]}; do 
+  echo "$cpop $pop $outgroup" >> fstats/f3/PREGO/input/list_f3outgroup_${outgroup}_${cpop}.txt; 
+  #generating par file 
+
+done; 
+(
+echo "genotypename:    $wrkDir/SUBSET_finalPops/$inputName.geno"
+echo "snpname:         $wrkDir/SUBSET_finalPops/$inputName.snp"
+echo "indivname:       $wrkDir/SUBSET_finalPops/$inputName.qpAdm.ss25.ind"
+echo "popfilename:     $wrkDir/fstats/f3/PREGO/input/list_f3outgroup_${outgroup}_${cpop}.txt"
+) > fstats/f3/PREGO/input/par.f3testOutgroup_${outgroup}_${cpop}_sour2.par
+
+cd 
+AdmixTools/bin/qp3Pop \
+-p $wrkDir/fstats/f3/PREGO/input/par.f3testOutgroup_${outgroup}_${cpop}_sour2.par \
+> $wrkDir/fstats/f3/PREGO/output/f3Out_${cpop}.log
+
+
+```
+
+## Compute f4 (Mbuti, France_BellBeaker; Icelandic, X)
+
+```{bash eval=FALSE}
+wrkDir="/sandbox/shares/mages/WGS_PREGO_Finistere_GAZEL/isabel/REICH_march2020"
+cd $wrkDir
+mkdir fstats/f4/PREGO
+mkdir fstats/f4/PREGO/input
+mkdir fstats/f4/PREGO/output
+
+inputName="fr_vk_1240kHO_WHG_SP"
+
+
+#generating list of comparisons
+FRPOPS=("cluster1" "cluster2" "cluster3" "CENTRE" \
+"LIMOUSIN.POITOU-CHARENTES" "BASSE-NORMANDIE.HAUTE-NORMANDIE" \
+"NORD-PAS-DE-CALAIS.PICARDIE" "ALSACE.LORRAINE")
+OTHERMODERN=("Basque" "English" "Scottish" "Sardinian" "Greek" \
+"Hungarian" "Icelandic" "Italian_North" "Italian_South" "Norwegian" \
+"Orcadian" "Spanish_North" "Spanish" )
+
+POPARRAY=( "${FRPOPS[@]}" "${OTHERMODERN[@]}" )
+
+outgroup="Mbuti"
+grep BellBeaker SUBSET_finalPops/fr_vk_1240kHO_WHG_SP.qpAdm.ss25.ind | awk '{print $3}' | sort | uniq | while read bpop; 
+do
+  cd $wrkDir
+  #bpop="France_BellBeaker_lowSteppe"
+  cpop="cluster2" 
+
+  for pop in ${POPARRAY[@]}; do
+    if [[ "$pop" != "$cpop" ]]; then 
+      echo "$outgroup $bpop $cpop $pop" >> fstats/f4/PREGO/input/list_f4testout_${outgroup}_${bpop}_${cpop}_X.txt
+    fi
+  done
+  (
+  echo "genotypename:    $wrkDir/SUBSET_finalPops/$inputName.geno"
+  echo "snpname:         $wrkDir/SUBSET_finalPops/$inputName.snp"
+  echo "indivname:       $wrkDir/SUBSET_finalPops/$inputName.qpAdm.ss25.ind"
+  echo "popfilename:     $wrkDir/fstats/f4/PREGO/input/list_f4testout_${outgroup}_${bpop}_${cpop}_X.txt"
+  echo "printsd:         YES"
+  ) > fstats/f4/PREGO/input/par.f4testout_${outgroup}_${bpop}_${cpop}_X.par
+
+  cd
+  /sandbox/users/alves-i/AdmixTools/bin/qpDstat -p $wrkDir/fstats/f4/PREGO/input/par.f4testout_${outgroup}_${bpop}_${cpop}_X.par > $wrkDir/fstats/f4/PREGO/output/par.f4testout_${outgroup}_${bpop}_${cpop}_X.log
+done
+```
+
+## Plotting f3 and f4 results
+
+```{r echo=TRUE}
+#####################################
+##
+## Plot heatmap with f3 statistics
+##
+####################################
+library("lattice")
+library("viridis") 
+##Bell Beakers
+
+wrkDir <- "/home/ialves/Dropbox/instDuThorax/REICH_SUPERDATASET_aDNA/PREGO/f3/output"
+setwd(wrkDir)
+listFile=list.files(path = wrkDir, pattern = "_tmp.log", full.names = T)
+listFile=listFile[-length(listFile)]
+COUNT <- 1
+for(f in listFile) {
+ # f <- listFile[1]
+  openFile <- read.table(f, header = F)
+  
+  if(COUNT==1) {
+    
+    nameCol <- as.character(unique(openFile[,2]))
+    tble_f3 <- matrix(openFile[,5])
+    rownames(tble_f3) <- as.character(openFile[,3])
+    
+  } else {
+    nameCol <- c(nameCol,as.character(unique(openFile[,2])))
+    tble_f3 <- cbind(tble_f3, openFile[match(rownames(tble_f3), openFile[,3]),5])
+  }
+  COUNT <- COUNT+1
+}
+tble_f3[is.na(tble_f3)] <- 0
+colnames(tble_f3) <- nameCol
+
+tble_f3 <- unique(tble_f3)
+
+orderFR <- c("cluster2", "cluster1", "BASSE-NORMANDIE.HAUTE-NORMANDIE", "NORD-PAS-DE-CALAIS.PICARDIE", "ALSACE.LORRAINE","CENTRE", "cluster3", "LIMOUSIN.POITOU-CHARENTES")
+
+remaingOrder <- c("Icelandic","Norwegian","Orcadian", "Scottish", "English", "Hungarian", "Basque", "Spanish_North", "Spanish", "Italian_North", "Italian_South", "Sardinian", "Greek")
+
+remaingOrder_toPublish <- c("Icelandic", "Norwegian","Orcadian", "Scottish", "English", "Hungarian", "Basque", "SpaN", "Spanish", "ItaN", "ItaS", "Sardinian", "Greek")
+
+publishNameFR <- c("WBR",  "EBP", "NOR", "HAU", "GRA", "CEN", "SLO", "NOU")
+allPops <- c(orderFR, remaingOrder)
+
+tble_f3 <- tble_f3[match(allPops, rownames(tble_f3)),]
+tble_f3[which(tble_f3==0)] <- NA
+rownames(tble_f3) <- substr(c(publishNameFR,remaingOrder_toPublish),start=1, stop=4)
+#colnames(tble_f3) <- substr(publishNameFR,start=1, stop=3)
+coord_x <- 1:nrow(tble_f3)
+coord_y <- unlist(lapply(1:ncol(tble_f3), function(x) {rep(x,nrow(tble_f3))}))
+
+png(filename = paste0(wrkDir, "/heatmap_f3_REICHMarc2020_PREGO_", Sys.Date(), ".png"), width = 12, height = 5, units = 'in', res = 300)
+par(mar=c(1,2,1,5))
+levelplot(tble_f3*100, col.regions=rev(inferno(100)), xlab="", ylab="", aspect = 0.45 , scales.margin="f3-Outgroup", scales=list(x=list(cex=1, rot=45), y=list(cex=1)), panel = function(...){
+            panel.levelplot(...)
+            ltext(x = coord_x, y= coord_y, labels =        round(as.matrix(tble_f3)[which(!is.na(as.matrix(tble_f3)))]*100, digits = 2), 
+                  cex = 0.8, font = 2, col = "white")
+        }, colorkey=list(labels=list(cex=1, font=1, col="black"), height=1, width=1, title="f3", space="right", row=1, column=2, vjust=2))
+
+dev.off()
+#
+#levelplot(t(as.matrix(openM*1000)) , col.regions=rev(inferno(50))[-c(1:5)], scales=list(x=list(cex=1, rot=45), y=list(cex=1, alternating=2)), xlab="", ylab="", scales.margin="Fst", panel = function(...){
+            panel.levelplot(...)
+            panel.abline(coef = c(0,1))
+            ltext(x = coord_x, y= coord_y, labels =        round(t(as.matrix(openM*1000))[which(!is.na(t(as.matrix(openM*1000))))], digits = 2), 
+                  cex = 1, font = 2, col = "white")
+        }, colorkey=list(labels=list(cex=1, font=1, col="black"), height=1, width=1.4, title="FST x 1000", space="bottom", row=1, column=2, vjust=2))
+##---------------- Vikings -----------------##
+
+wrkDir <- "/home/ialves/Dropbox/instDuThorax/REICH_SUPERDATASET_aDNA/PREGO/f3/output"
+setwd(wrkDir)
+listFile=list.files(path = wrkDir, pattern = "_tmp.log", full.names = T)
+listFile=listFile[length(listFile)]
+COUNT <- 1
+for(f in listFile) {
+  # f <- listFile[1]
+  openFile <- read.table(f, header = F)
+  
+  if(COUNT==1) {
+    
+    nameCol <- as.character(unique(openFile[,2]))
+    tble_f3 <- matrix(openFile[,5])
+    rownames(tble_f3) <- as.character(openFile[,3])
+    
+  } else {
+    nameCol <- c(nameCol,as.character(unique(openFile[,2])))
+    tble_f3 <- cbind(tble_f3, openFile[match(rownames(tble_f3), openFile[,3]),5])
+  }
+  COUNT <- COUNT+1
+}
+tble_f3[is.na(tble_f3)] <- 0
+colnames(tble_f3) <- nameCol
+
+tble_f3 <- unique(tble_f3)
+
+orderFR <- c("cluster2", "cluster1", "cluster3", "BASSE-NORMANDIE.HAUTE-NORMANDIE", "NORD-PAS-DE-CALAIS.PICARDIE", "ALSACE.LORRAINE","CENTRE","LIMOUSIN.POITOU-CHARENTES")
+
+publishNameFR <- c("WBR",  "EBP", "SLO", "NOR", "HAU", "GRA", "CEN", "NOU")
+allPops <- c(orderFR)
+
+tble_f3 <- matrix(tble_f3[match(allPops, rownames(tble_f3)),])
+tble_f3[which(tble_f3==0)] <- NA
+
+rownames(tble_f3) <- substr(publishNameFR,start=1, stop=3)
+#colnames(tble_f3) <- substr(publishNameFR,start=1, stop=3)
+colnames(tble_f3) <- "Vikings"
+png(filename = paste0(wrkDir, "/heatmap_f3_REICHMarc2020_PREGO_VK.png"), width = 4, height = 3, units = 'in', res = 300)
+par(mar=c(2,2,1,5))
+levelplot(tble_f3, col.regions=inferno(100), xlab="", ylab="", scales.margin="f3-Outgroup", scales=list(x=list(cex=1, rot=45), y=list(cex=0.8)), colorkey=list(labels=list(cex=0.75, font=1, col="black"), height=1, width=1.4, title="f3-Outgroup", space="bottom", row=1, column=2, vjust=2))
+dev.off()
+
+
+#####################################
+##
+## Plot lolipop plots with f4 statistics
+##
+####################################
+  workDir <- "/home/ialves/Dropbox/instDuThorax/REICH_SUPERDATASET_aDNA/PREGO/f4/output/"
+  setwd(workDir)
+  popC <- "cluster2" # change here to the f4(a,b; c, d)
+  popB <- ""
+  fileNames <- list.files(workDir, pattern="par.Dstats_Mbuti_modAncTest*", full.names=TRUE)
+  
+  frPOPs <- c("cluster2", "cluster1", "cluster3", "BASSE-NORMANDIE.HAUTE-NORMANDIE", "NORD-PAS-DE-CALAIS.PICARDIE", "ALSACE.LORRAINE","CENTRE","LIMOUSIN.POITOU-CHARENTES")
+  publishLabels <- c("WBR",  "EBP", "SLO", "NOR", "HAU", "GRA", "CEN", "NOU")
+  
+  remaingOrder <- c("Icelandic","Norwegian","Orcadian", "Scottish", "English", "Hungarian", "Basque", "Spanish_North", "Spanish", "Italian_North", "Italian_South", "Sardinian", "Greek")
+  remaingOrder_toPublish <- c("Icelandic", "Norwegian","Orcadian", "Scottish", "English", "Hungarian", "Basque", "SpaN", "Spanish", "ItaN", "ItaS", "Sardinian", "Greek")
+  
+  allPops <- c(frPOPs, remaingOrder)
+  publishLabels <- c(publishLabels, remaingOrder_toPublish)
+  
+  if(is.element(popC, allPops)) {
+    labelsToChange <- setdiff(allPops, popC)
+    publishLabelsToChange <- publishLabels[which(allPops != popC)]
+  } else {
+    labelsToChange <- setdiff(allPops, popB)
+    publishLabelsToChange <- publishLabels[which(allPops != popB)]
+    
+  }
+  
+  for(file in fileNames) {
+    #file <- fileNames[1]
+    open.f4 <- read.table(file, header = FALSE)
+    # if(popC == "BRETAGNE") {
+    #   indexOrder <- c(match(frenchPOPs[-which(frenchPOPs == popC)], open.f4$V5), (1:nrow(open.f4))[-match(frenchPOPs[-which(frenchPOPs == popC)], open.f4$V5)])
+    #   open.f4 <- open.f4[indexOrder,]
+    # }
+    outgroupLabel <- as.character(unique(open.f4$V1))
+    popLabel <- as.character(unique(open.f4$V2))
+    sd.f4 <- rep(NA,nrow(open.f4)+2)
+    #sd.f4 <- open.f4$V6/open.f4$V7
+    sd.f4 <- open.f4$V6
+  
+    z.score <- rep(NA,nrow(open.f4)+2)
+    z.score <- open.f4$V7
+    f4Stats <- rep(NA,nrow(open.f4)+2)
+    f4Stats <- open.f4$V5
+    fontype <- rep(1, nrow(open.f4))
+  
+    #fontype[c(5,10)] <- NA
+    fontype[which(abs(open.f4$V7) > 3)] <- 4 #Z-score larger than 3
+    colorsGROUP <- "grey"
+    popLabels <- as.character(open.f4$V4)
+    popLabels[match(labelsToChange, popLabels)] <- substr(publishLabelsToChange  ,start=1, stop=4)
+    colLabels <- rep("black", length(popLabels))
+    colLabels[match(publishLabels[1:8], popLabels)] <- "royalblue"
+    
+    #plot png
+    png(file=paste0(workDir, "/", outgroupLabel, "_", popLabel, "_", popC, "_sour2.png"),  height = 8, width = 6,
+    units = 'in', res = 300)
+    par(mfrow=c(1,1),mar=c(4,2,2,5))
+    plot(x=f4Stats, y=nrow(open.f4):1,
+         xlim=range(min(f4Stats-sd.f4, na.rm = T), max(f4Stats+sd.f4, na.rm = T)),
+         pch=19, ylab="", main=paste0("f4(",outgroupLabel, ", ", popLabel, "; " , popC, ", X)"), yaxt='n', col=colorsGROUP,
+         xlab="D-stats", cex.lab=2, axes = T, type = 'n', cex.axis=1.5) # xlim=c(-0.006,0.006)
+    
+    # hack: we draw arrows but with very special "arrowheads"
+    arrows(x0=f4Stats-sd.f4, y0=nrow(open.f4):1, 
+           x1=f4Stats+sd.f4, y1=nrow(open.f4):1,
+           length=0.05, angle=90, code=0, col = "grey48", lwd=2)
+    points(x=f4Stats, y=nrow(open.f4):1, col=colorsGROUP,
+           pch=19, cex=2)
+    abline(v=0, lty=2, lwd=2, col="grey75")
+    #abline(h=c(5,10), lty=1, lwd=1, col="black")
+    #axis(2, at=(nrow(open.f4)+2):1, labels = FALSE, las=1, cex.axis=0.75)
+    #mtext(text=orderPopsAll, side = 2, at = length(orderPopsAll):1, col=c(rep("brown4", 7), rep("grey75", length(orderPopsAll)-7)), las = 2, adj=1, line = 1)
+    axis(4, at=nrow(open.f4):1, labels = FALSE, las=1, cex.axis=0.75)
+    mtext(text=substr(popLabels, start=1, stop=4), at=nrow(open.f4):1, side = 4,
+          las = 2, adj = 0, line = 1, col=colLabels, font=fontype, cex=1.5)
+    dev.off()
+  }
+
+
+###########################################
+########################################
+####################################
+################################
+###-------------------
+```
+## qpAdm estimates 
+
+From a HOA file containing Marinna's SP and WHG:
+/sandbox/shares/mages/WGS_PREGO_Finistere_GAZEL/isabel/REICH_march2020/SUBSET_finalPops/fr_vk_1240kHO_WHG_SP.*
+
+we have to merge with the 6 french Medieval samples. 
+The resulting file has to be annotated according to the western France clustering and aDNA samples (eg Vikings) with a large sample size need to be downsampled. 
+
+
+```{bash eval=FALSE}
+#merge EIGENSTRAT aDNA medieval samples with modern French populations, in-house generated or in Reich's dataset.
+
+#merging the three datasets
+dirREICH="/sandbox/shares/mages/WGS_PREGO_Finistere_GAZEL/isabel/REICH_march2020/SUBSET_finalPops"
+reichFile="fr_vk_1240kHO_WHG_SP"
+
+diraDNA="/sandbox/shares/mages/WGS_PREGO_Finistere_GAZEL/isabel/FR_aDNA_medieval/calling_HOA"
+inName="fr_medieval"
+
+#replace dbSNP id to CHROM:POS in the .snp file 
+#cat $diraDNA/$inName.snp | while read line; do awk '{BEGIN { FS = " " }; {print $2":"$4,$2,$3,$4,$5,$6}' >> $diraDNA/$inName.bis.snp; done
+
+(
+echo "geno1:           $dirREICH/$reichFile.geno"     
+echo "snp1:            $dirREICH/$reichFile.snp"
+echo "ind1:            $dirREICH/$reichFile.ind"
+echo "geno2:           $diraDNA/$inName.geno"
+echo "snp2:            $diraDNA/$inName.bis.bis.snp"
+echo "ind2:            $diraDNA/$inName.ind"
+echo "genooutfilename: $diraDNA/mergeHOA/fr_vk_1240kHO_WHG_SP_sixMedieval.geno"
+echo "snpoutfilename:  $diraDNA/mergeHOA/fr_vk_1240kHO_WHG_SP_sixMedieval.snp"
+echo "indoutfilename:  $diraDNA/mergeHOA/fr_vk_1240kHO_WHG_SP_sixMedieval.ind"
+echo "outputformat:    EIGENSTRAT"
+echo "docheck: YES"
+echo "strandcheck: YES"
+) > $diraDNA/mergeHOA/input.MERGEIT.aDNA.par
+
+/sandbox/users/alves-i/EIG-6.1.4/bin/mergeit -p $diraDNA/mergeHOA/input.MERGEIT.aDNA.par > $diraDNA/mergeHOA/input.MERGEIT.aDNA.par.log
+
+#locally
+cd /home/ialves/Dropbox/instDuThorax/REICH_SUPERDATASET_aDNA/PREGO/qpAdm/SAMPLES
+scp alves-i@bird2login.univ-nantes.fr:/sandbox/shares/mages/WGS_PREGO_Finistere_GAZEL/isabel/FR_aDNA_medieval/calling_HOA/mergeHOA/fr_vk_1240kHO_WHG_SP_sixMedieval.ind .
+```
+
+Below is the re-annotation of the resulting *.ind file.
+
+```{r echo=TRUE}
+## importing libraries
+
+require(stringr)
+
+#########################################
+##
+## Selection of samples from Mathienson et al 2015
+## as followed by Marinna
+##
+########################################
+
+#folder where the annotation file is
+# The folder name needs to be changed according to where one stores the file.
+# to find path one needs to open the command line go into the folder where the files are 
+# and where we want to generate new files and do : pwd 
+# use the result to replace the path below
+wrkDir <- "/home/ialves/Dropbox/instDuThorax/REICH_SUPERDATASET_aDNA/PREGO/qpAdm/SAMPLES"
+
+#name of the annotation file
+fileNameAnn <- "Informations_Ancient_People.anno"
+#name of the .ind file
+fileNameInd <- "fr_vk_1240kHO_WHG_SP_sixMedieval.ind"
+
+#open the ind file
+table_Ind <- read.table(paste0(wrkDir, "/", fileNameInd), header = F)
+nrow(table_Ind)
+
+###################################
+##
+## replace French IDs
+## based on the fineSTRUCTURE 
+## groups
+## 
+##
+################################### 
+
+fileNameFINEclusters <- "FR_MS_PS_POBI_HGDPMbu_Basq_Orc_Sar.commonSNPs.flipped.hwe.maf0.05.fam"
+
+openFINEclusters <- read.table(paste0(wrkDir, "/", fileNameFINEclusters), header = F)
+
+#transf IDs such that IDs in the .fam file are in the same format as the ones in the .ind file
+transfIDs_PREGO <- str_subset(sapply(as.character(openFINEclusters[,2]), function(x) { unlist(strsplit(x, split = ":"))[2]}), pattern = c("PREGO"))
+transfIDs_FINI <- str_subset(sapply(as.character(openFINEclusters[,2]), function(x) { unlist(strsplit(x, split = ":"))[2]}), pattern = c("FINISTERE"))
+transfIDs_GAZEL <- str_subset(sapply(as.character(openFINEclusters[,2]), function(x) { unlist(strsplit(x, split = ":"))[2]}), pattern = c("GAZEL"))
+#putting the samples all together
+allFRsamples <- c(transfIDs_PREGO, transfIDs_FINI, transfIDs_GAZEL)
+
+#the underscore was replaced by the colon
+allFR_sepReplaced <- str_replace(allFRsamples, "_", ":")
+
+#just keep the IDs in the vector  
+fam_indIDs <- as.character(openFINEclusters[,2])
+#change the french IDs
+fam_indIDs[match(allFRsamples, sapply(as.character(openFINEclusters[,2]), function(x) { unlist(strsplit(x, split = ":"))[2]}))] <- allFR_sepReplaced
+
+#generate a new Fam file
+newFamFile <- cbind(openFINEclusters[,1], fam_indIDs, openFINEclusters[,3:6])
+
+#creating an empty list
+indFile_clusters <- list()
+
+# the loop below goes along the .ind file,
+# checks the individual ID and if it is a French ID 
+# and it changes the population label in the .ind file according 
+# to the information on the .fam file
+# like this we keep the same samples as the ones used with the modern DNA analysis
+# and grouped as clusters in northwestern France
+
+for(sample in 1:nrow(table_Ind)) {
+  
+  #sample <- 3000
+  if(is.element(as.character(table_Ind[sample,1]), allFR_sepReplaced)) {
+    
+    if(newFamFile[which(newFamFile[,2] == as.character(table_Ind[sample,1])),6] == "-9") {
+    
+      indFile_clusters[[sample]] <- c(as.character(unlist(table_Ind[sample,1:2])), "FranceUnknown")
+    } else {
+      indFile_clusters[[sample]] <- c(as.character(unlist(table_Ind[sample,1:2])),as.character(newFamFile[which(newFamFile[,2] == as.character(table_Ind[sample,1])),6]))
+    }
+  } else if (as.character(table_Ind[sample,1]) == "fra009"){
+    indFile_clusters[[sample]] <- c(as.character(unlist(table_Ind[sample,1:2])), "FRMedieval_outlier")
+  } else {
+    indFile_clusters[[sample]] <- as.character(unlist(table_Ind[sample,]))
+  }
+  
+}
+#merge the element of the list
+finalIndFile <- do.call(rbind, indFile_clusters, quote = F)
+
+#downsampling the Vikings and the Spanish
+popToDownSample <- c("Vikings")
+for(pop in popToDownSample){
+  #pop <- popToDownSample[1]
+  nbSamples <- length(which(finalIndFile[,3] == pop))
+  if(pop == "Vikings") {
+    finalIndFile[sample(which(finalIndFile[,3] == pop), nbSamples-25),3] <- "VikingsUnknown"
+  } else if(pop == "Spanish") {
+    finalIndFile[sample(which(finalIndFile[,3] == pop), nbSamples-25),3] <- "SpanishUnknown"
+  }
+}
+
+#save the new .ind file 
+write.table(finalIndFile, file=paste0(wrkDir, "/fr_vk_1240kHO_WHG_SP_sixMedieval.fr25.ind"), quote = F, row.names = F, col.names = F, sep = " ")
+
+```
+
+Copying it to the server again.
+
+```{bash eval=FALSE}
+#locally
+cd /home/ialves/Dropbox/instDuThorax/REICH_SUPERDATASET_aDNA/PREGO/qpAdm/SAMPLES
+scp fr_vk_1240kHO_WHG_SP_sixMedieval.fr25.ind alves-i@bird2login.univ-nantes.fr:/sandbox/shares/mages/WGS_PREGO_Finistere_GAZEL/isabel/FR_aDNA_medieval/calling_HOA/mergeHOA/
+```
+
+## Samples 
+From Calcolithic to the present from France, Iberia, Italy, Switzerland, Germany, Denmark, Norway, Iceland and UK. 
+
+France:
+      5 France_BellBeaker
+      2 France_BellBeaker_lowSteppe
+
+Iberia:
+      3 Iberia_BellBeaker
+      4 Iberia_MBA.SG
+     23 Iberia_BA
+      3 Iberia_BA_Cogotas
+      1 Iberia_BA_published
+     13 Iberia_BellBeaker
+      1 Iberia_C_BA
+      3 Iberia_Celtiberian
+     38 Iberia_C
+      1 Iberia_EBA
+      2 Iberia_LBA_Cogotas
+      3 Iberia_Medieval_published
+      5 Iberia_Roman
+
+England:
+     18 England_BellBeaker
+     14 England_C_EBA
+      1 England_LBA
+      6 England_MBA
+      1 England_LIA_ERoman.SG
+      6 England_Roman.SG
+      8 England_Saxon.SG
+Wales: 
+     2 Wales_C.SG
+Scotland:
+      2 Scotland_BellBeaker
+      3 Scotland_C_EBA
+      2 Scotland_LBA
+      3 Scotland_MBA
+Germany:
+      1 Germany_BA.SG
+     30 Germany_BellBeaker
+      6 Germany_Lech_BellBeaker
+      8 Germany_CordedWare
+      4 Germany_EBA_Unetice
+     22 Germany_Lech_EBA
+      1 Germany_LBA_Halberstadt_published
+      2 Germany_Lech_MBA
+     24 Germany_EMedieval.SG
+      1 Germany_LRoman.SG
+Switzerland:
+     2 Switzerland_BellBeaker
+Denmark:
+     1 Denmark_BA.SG
+     1 Denmark_LBA.SG
+Italy:
+     3 Italy_North_BellBeaker
+      7 Italy_C_BA.SG
+      3 Italy_C.SG
+      1 Italy_North_Remedello_C.SG
+      1 Italy_North_Remedello_EBA.SG
+     45 Italy_Imperial.SG
+     11 Italy_Medieval_EarlyModern_oCentralEuropean.SG
+     17 Italy_Medieval_EarlyModern.SG
+     14 Italy_North_EarlyMedieval_Langobards
+      3 Italy_Imperial.SG
+
+Testing one population:
+     11 Italy_Medieval_EarlyModern_oCentralEuropean.SG
+     17 Italy_Medieval_EarlyModern.SG
+     14 Italy_North_EarlyMedieval_Langobards
+     24 Germany_EMedieval.SG
+      3 Iberia_Medieval_published
+     23 Iceland_Pre_Christian.SG
+
+### qpAdm twoWay models - MODERN FRENCH 
+
+```{bash eval=FALSE}
+
+wrkDir="/sandbox/shares/mages/WGS_PREGO_Finistere_GAZEL/isabel/REICH_march2020/fstats"
+cd $wrkDir
+dataDir="/sandbox/shares/mages/WGS_PREGO_Finistere_GAZEL/isabel/FR_aDNA_medieval/calling_HOA/mergeHOA"
+
+if [ ! -d qpAdm/PREGO ]; then
+mkdir qpAdm/PREGO/
+#mkdir qpAdm/PREGO/onePop/
+mkdir qpAdm/PREGO/twoPop/
+else
+if [ ! -d qpAdm/PREGO/twoPop/ ]; then
+#mkdir /qpAdm/PREGO/onePop/
+mkdir qpAdm/PREGO/twoPop/
+fi
+fi 
+
+#cd qpAdm/PREGO/onePop/
+cd qpAdm/PREGO/twoPop/
+
+inputName="fr_vk_1240kHO_WHG_SP_sixMedieval"
+rightPops="/sandbox/shares/mages/WGS_PREGO_Finistere_GAZEL/isabel/REICH_march2020/fstats/qpAdm/onePop/right_pops.txt"
+#sourcePop=( "England_Roman.SG" )
+sourcePop=("Italy_North_EarlyMedieval_Langobards" "Italy_Medieval_EarlyModern_oCentralEuropean.SG" "Italy_Medieval_EarlyModern.SG"  "Germany_EMedieval.SG" "Germany_LRoman.SG" "Iberia_IA" "Iberia_Celtiberian" "Iberia_Roman_o_published" "Iberia_Medieval_published" "Vikings"  "Iceland_Pre_Christian.SG" "Iceland_Early_Christian.SG" "Ireland_BA.SG" "England_IA_LIA_Roman.SG" "England_Saxon.SG" "Basque" "English" "Scottish" "Greek" "Hungarian" "Icelandic" "Italian_North" "Italian_South" "Norwegian" "Orcadian" "Spanish_North" "Spanish" "Sardinian")
+
+
+fixedSourcePop=("FRMedieval")
+FRPOPS=( "cluster2" "cluster1" "cluster3" "BASSE-NORMANDIE.HAUTE-NORMANDIE" "NORD-PAS-DE-CALAIS.PICARDIE" "ALSACE.LORRAINE" "CENTRE" "LIMOUSIN.POITOU-CHARENTES" ) #
+
+
+#for s in ${sourcePop[@]}; do
+#cd ${wrkDir}/qpAdm/PREGO/onePop/
+#cd ${wrkDir}/qpAdm/PREGO/twoPop/
+#mkdir $s/
+#mkdir $s/output
+
+for target in ${FRPOPS[@]}; do
+
+for s in ${sourcePop[@]}; do
+
+  cd ${wrkDir}/qpAdm/PREGO/twoPop/
+  mkdir ${target}_${s}/
+  mkdir ${target}_${s}/output
+
+  echo $target > ${target}_${s}/$target.$s.reference.pop
+  echo $fixedSourcePop >> ${target}_${s}/$target.$s.reference.pop
+  echo $s >> ${target}_${s}/$target.$s.reference.pop
+
+
+  #aDNA medieval
+  (
+  echo "genotypename:    $dataDir/$inputName.geno"
+  echo "snpname:         $dataDir/$inputName.snp"
+  echo "indivname:       $dataDir/$inputName.fr25.ind"
+  #echo "popleft:         $wrkDir/qpAdm/PREGO/onePop/$s/$target.reference.pop"
+  echo "popleft:         $wrkDir/qpAdm/PREGO/twoPop/${target}_${s}/$target.$s.reference.pop"
+  echo "popright:        $rightPops"
+  echo "details: YES"
+  ) > ${target}_${s}/par.qpAdm.twoPop.$target.$s.par
+
+  cd 
+  echo "/sandbox/users/alves-i/AdmixTools/bin/qpAdm -p $wrkDir/qpAdm/PREGO/twoPop/${target}_${s}/par.qpAdm.twoPop.$target.$s.par > $wrkDir/qpAdm/PREGO/twoPop/${target}_${s}/output/par.qpAdm.twoPop.$target.$s.log" > $target.$s.twoWay.bash
+  chmod +x $target.$s.twoWay.bash
+  qsub -S /bin/bash -cwd ./$target.$s.twoWay.bash
+done
+done
+
+
+# find -type d ! -name 'rightPops' -exec rm -rf '{}' \;
+```
+
+### qpAdm oneWay models - MODERN FRENCH 
+
+```{bash eval=FALSE}
+
+wrkDir="/LAB-DATA/BiRD/shares/ITX/mages/WGS_PREGO_Finistere_GAZEL/isabel/REICH_march2020/fstats"
+cd $wrkDir
+dataDir="/LAB-DATA/BiRD/shares/ITX/mages/WGS_PREGO_Finistere_GAZEL/isabel/FR_aDNA_medieval/calling_HOA/mergeHOA"
+
+if [ ! -d qpAdm/PREGO ]; then
+mkdir qpAdm/PREGO/
+mkdir qpAdm/PREGO/onePop/
+else
+if [ ! -d qpAdm/PREGO/onePop/ ]; then
+mkdir /qpAdm/PREGO/onePop/
+fi
+fi 
+
+cd qpAdm/PREGO/onePop/
+
+
+inputName="fr_vk_1240kHO_largest"
+rightPops="/LAB-DATA/BiRD/shares/ITX/mages/WGS_PREGO_Finistere_GAZEL/isabel/REICH_march2020/fstats/qpAdm/onePop/right_pops.txt"
+#sourcePop=( "England_Roman.SG" )
+#sourcePop=("Italy_North_EarlyMedieval_Langobards" "Italy_Medieval_EarlyModern_oCentralEuropean.SG" "Italy_Medieval_EarlyModern.SG"  "Germany_EMedieval.SG" "Germany_LRoman.SG" "Iberia_IA" "Iberia_Celtiberian" "Iberia_Roman_o_published" "Iberia_Medieval_published" "Vikings"  "Iceland_Pre_Christian.SG" "Iceland_Early_Christian.SG" "Ireland_BA.SG" "England_IA_LIA_Roman.SG" "England_Saxon.SG" "Basque" "English" "Scottish" "Greek" "Hungarian" "Icelandic" "Italian_North" "Italian_South" "Norwegian" "Orcadian" "Spanish_North" "Spanish" "Sardinian")
+
+#sourcePop=( "Italy_Imperial.SG" "Iberia_Iberian" "Iberia_Roman" "Iberia_Visigoth_Barcelona" "Iberia_Visigoth_Girona" "Iberia_Visigoth_Granada" "Iberia_Carolingian" )
+
+sourcePop=( "FR_EMedieval" )
+
+#FRPOPS=( "cluster2" "cluster1" "cluster3" "BASSE-NORMANDIE.HAUTE-NORMANDIE" "NORD-PAS-DE-CALAIS.PICARDIE" "ALSACE.LORRAINE" "CENTRE" "LIMOUSIN.POITOU-CHARENTES" ) 
+FRPOPS=( "FR_HMedieval" )
+
+for s in ${sourcePop[@]}; do
+
+  for target in ${FRPOPS[@]}; do
+    
+    cd ${wrkDir}/qpAdm/PREGO/onePop/
+    mkdir $s/
+    mkdir $s/output
+
+    echo $target > ${s}/$target.reference.pop
+    echo $s >> ${s}/$target.reference.pop
+
+    #aDNA medieval
+    (
+    echo "genotypename:    $dataDir/$inputName.geno"
+    echo "snpname:         $dataDir/$inputName.snp"
+    echo "indivname:       $dataDir/$inputName.fr25.splitFrMed.ind"
+    echo "popleft:         $wrkDir/qpAdm/PREGO/onePop/$s/$target.reference.pop"
+    echo "popright:        $rightPops"
+    echo "details: YES"
+    ) > ${s}/par.qpAdm.OnePop.$s.$target.par
+
+    cd 
+    echo "/SCRATCH-BIRD/users/alves-i/AdmixTools/bin/qpAdm -p $wrkDir/qpAdm/PREGO/onePop/${s}/par.qpAdm.OnePop.$s.$target.par > $wrkDir/qpAdm/PREGO/onePop/${s}/output/par.qpAdm.onePop.$s.$target.log" > $s.$target.oneWay.bash
+  chmod +x $s.$target.oneWay.bash
+  qsub -S /bin/bash -cwd ./$s.$target.oneWay.bash
+done
+done
+
+#collect results 
+wrkDir="/LAB-DATA/BiRD/shares/ITX/mages/WGS_PREGO_Finistere_GAZEL/isabel/REICH_march2020/fstats"
+cd ${wrkDir}/qpAdm/PREGO/onePop/FR_EMedieval/output/
+for file in *.log; do mFRpop=`echo $file | cut -d$'.' -f5`; aFRpop=`echo $file | cut -d$'.' -f4`; pvalue=`grep f4rank: $file | head -1 | awk '{print $8}'`; echo -e "$aFRpop\t$mFRpop\t$pvalue" >> EMedieval_mFrench.txt; echo ""; done
+cd ${wrkDir}/qpAdm/PREGO/onePop/FR_HMedieval/output/
+for file in *.log; do mFRpop=`echo $file | cut -d$'.' -f5`; aFRpop=`echo $file | cut -d$'.' -f4`; pvalue=`grep f4rank: $file | head -1 | awk '{print $8}'`; echo -e "$aFRpop\t$mFRpop\t$pvalue" >> HMedieval_mFrench.txt; echo ""; done
+
+# find -type d ! -name 'rightPops' -exec rm -rf '{}' \;
+```
+
+## Plotting results for the population continuity (onePop) qpAdm - MODERN FRENCH
+
+```{bash eval=FALSE}
+wrkDir="/sandbox/shares/mages/WGS_PREGO_Finistere_GAZEL/isabel/REICH_march2020/fstats/qpAdm/PREGO/onePop"
+cd $wrkDir
+if [ ! -d matrices/ ]; then
+echo "Creating folder to collect f4rank";
+mkdir matrices
+else 
+echo "Folder matrices already exists.";
+fi
+
+for dir in */; do 
+dir=${dir%/}; 
+if [ "$dir" != "matrices" ]; then
+echo "Collecting data from: $dir"; 
+for file in $dir/output/*.log;
+do 
+targetPop=`echo $file | sed "s/.*$dir.\(.*\).log/\1/"`
+pval=`cat $file | grep f4rank | sed -n 2p | awk '{print $14}'`
+echo "Fetching f4rank for target population: $targetPop";
+echo "Model p-value: $pval";
+echo ""
+echo "$targetPop $pval" >> matrices/$dir.f4rank;
+done
+fi
+done
+
+```
+
+```{r echo=TRUE}
+library(RColorBrewer)
+require(stringr)
+  set.seed(6)
+  wrkDir="/home/ialves/Dropbox/instDuThorax/REICH_SUPERDATASET_aDNA/PREGO/qpAdm/onePop/matrices"
+  setwd(wrkDir)
+  
+  FRPOPS=c("cluster2", "cluster1", "cluster3", "BASSE-NORMANDIE.HAUTE-NORMANDIE", "NORD-PAS-DE-CALAIS.PICARDIE", 
+           "ALSACE.LORRAINE", "CENTRE", "LIMOUSIN.POITOU-CHARENTES")
+  
+  publishNameFR <- c("WBR",  "EBP", "SLO", "NOR", "HAU", "GRA", "CEN", "NOU")
+  
+  
+  fileList <- list.files(path = wrkDir, pattern = "*.f4rank", full.names = T)
+  countryNames <- unlist(lapply(1:length(fileList), function(k) {unlist(strsplit(strsplit(fileList[k], split = "/")[[1]][length(strsplit(fileList[k], split = "/")[[1]])], split = "_"))[1]}))
+  
+  uniqCountries <- unique(countryNames)
+  if(sum(str_detect(uniqCountries, "FRMedieval.f4rank", negate = FALSE)) | sum(str_detect(uniqCountries, "Vikings.f4rank", negate = FALSE)) > 0) {
+    uniqCountries[which(str_detect(uniqCountries, "FRMedieval.f4rank", negate = FALSE))] <- "France"
+    countryNames[which(countryNames == "FRMedieval.f4rank")] <- "France"
+    uniqCountries[which(str_detect(uniqCountries, "Vikings.f4rank", negate = FALSE))] <- "Scandinavia"
+    countryNames[which(countryNames == "Vikings.f4rank")] <- "Scandinavia"
+  }
+  #setting pch
+  pchTypesSampled <- sample(1:20, length(uniqCountries))
+  pchType <- rep(NA,length(countryNames))
+  for(country in uniqCountries){
+    pchType[which(countryNames == country)] <- pchTypesSampled[which(uniqCountries == country)]
+  }
+  #setting colour
+  if(length(countryNames) > 8) {
+    coloraPops <- brewer.pal(8, "Set3")
+    coloraPops <- c(coloraPops,brewer.pal(length(fileList)-8, "Set1"))
+  } else {
+    coloraPops <- brewer.pal(length(fileList), "Set3")
+  }
+  png(filename = paste0(wrkDir, "/log10_modelPValue.png"), width = 16, 
+      height = 4, units = 'in', res = 300)
+  par(mar=c(4,4,1,1))
+  layout(matrix(c(1,2), ncol = 2, byrow = T), widths = c(3,2))
+  f4rank_l <- list()
+  for(fileNb in 1:length(fileList)){
+    openF <- read.table(fileList[fileNb], header = F)
+    openF <- openF[match(FRPOPS,openF[,1]),]
+    
+    aPOP <- unlist(strsplit(unlist(strsplit(fileList[fileNb], split = "/"))[length(unlist(strsplit(fileList[fileNb], split = "/")))], split="\\."))[1]
+    
+    f4rank_l[[aPOP]] <- as.vector(openF[,2])
+    names(f4rank_l[[aPOP]]) <-  as.vector(openF[,1]) 
+    if(fileNb == 1) {
+      plot(log10(f4rank_l[[aPOP]]), type = "b", col=coloraPops[fileNb], ylim=c(-130,0),
+           xlim = c(1,14), ylab = "log10(p-Value)", xaxt='n', xlab="", pch=pchType[fileNb], lwd=2)
+    } else {
+      lines(log10(f4rank_l[[aPOP]]), type = "b", col=coloraPops[fileNb], pch=pchType[fileNb], lwd=2)
+    }
+  }
+  axis(1, at=1:8, labels = substr(publishNameFR, start = 1, stop = 3))
+  abline(h=log10(0.05), col="grey55",lwd=2)
+  legend("right", legend=names(f4rank_l), pch = pchType, lty = 1, col = coloraPops, 
+         bty = "n", cex = 0.8, pt.cex=1.2, pt.lwd = 1.2, lwd = 1.5)
+  
+  f4rank_l <- list()
+  for(fileNb in 1:length(fileList)){
+    openF <- read.table(fileList[fileNb], header = F)
+    openF <- openF[match(FRPOPS,openF[,1]),]
+    
+    aPOP <- unlist(strsplit(unlist(strsplit(fileList[fileNb], split = "/"))[length(unlist(strsplit(fileList[fileNb], split = "/")))], split="\\."))[1]
+    
+    f4rank_l[[aPOP]] <- as.vector(openF[,2])
+    if(sum(f4rank_l[[aPOP]] > 0.05) == 0){
+      coloraPops[fileNb] <- "grey90"
+    }
+    names(f4rank_l[[aPOP]]) <-  as.vector(openF[,1]) 
+    if(fileNb == 1) {
+      plot(log10(f4rank_l[[aPOP]]), type = "b", col=coloraPops[fileNb], ylim=c(-10,0), ylab = "log10(p-Value)", xaxt='n',
+           xlab="", pch=pchType[fileNb], lwd=2)
+    } else {
+      lines(log10(f4rank_l[[aPOP]]), type = "b", col=coloraPops[fileNb], pch=pchType[fileNb], lwd=2)
+    }
+  }
+  axis(1, at=1:8, labels = substr(publishNameFR, start = 1, stop = 3))
+  abline(h=log10(0.05), col="grey55", lwd=2)
+  #legend("right", legend=names(f4rank_l), pch = pchType, lty = 1, col = coloraPops, bty = "n", cex = 1, pt.cex=1.2, pt.lwd = 1.2)
+  dev.off()
+
+
+```
+### qpAdm - MEDIEVAL FRENCH 
+
+```{bash eval=FALSE}
+
+wrkDir="/LAB-DATA/BiRD/shares/ITX/mages/WGS_PREGO_Finistere_GAZEL/isabel/REICH_march2020/fstats"
+cd $wrkDir
+dataDir="/LAB-DATA/BiRD/shares/ITX/mages/WGS_PREGO_Finistere_GAZEL/isabel/FR_aDNA_medieval/calling_HOA/mergeHOA"
+
+if [ ! -d qpAdm/aDNAMedieval ]; then
+mkdir qpAdm/aDNAMedieval/
+mkdir qpAdm/aDNAMedieval/onePop/
+else
+if [ ! -d qpAdm/aDNAMedieval/onePop/ ]; then
+mkdir /qpAdm/aDNAMedieval/onePop/
+fi
+fi 
+
+cd qpAdm/aDNAMedieval/onePop/
+
+inputName="fr_vk_1240kHO_largest"
+rightPops="/LAB-DATA/BiRD/shares/ITX/mages/WGS_PREGO_Finistere_GAZEL/isabel/REICH_march2020/fstats/qpAdm/onePop/right_pops.txt"
+#sourcePop=( "Italy_Medieval_EarlyModern_oCentralEuropean.SG" "Italy_Medieval_EarlyModern.SG" "Italy_North_EarlyMedieval_Langobards" "Italy_Imperial.SG" "Iberia_IA" "Iberia_Celtiberian" "Iberia_Iberian" "Iberia_Roman" "Iberia_Medieval_published" "Iberia_Visigoth_Barcelona" "Iberia_Visigoth_Girona" "Iberia_Visigoth_Granada" "Iberia_Carolingian" "England_LIA.SG" "England_Roman.SG" "England_Saxon.SG" "Vikings" "Germany_LRoman.SG" "Germany_EMedieval.SG")
+sourcePop=( "Basque" )
+#Iceland_Pre_Christian_Gaelic.SG
+#Iceland_Pre_Christian_Norse.SG
+#"Iceland_Pre_Christian.SG" 
+#"England_LIA_ERoman.SG" "England_IA.SG"
+
+FRPOPS=( "cluster2" "cluster1" "cluster3" "BASSE-NORMANDIE.HAUTE-NORMANDIE" "NORD-PAS-DE-CALAIS.PICARDIE" "ALSACE.LORRAINE" "CENTRE" "LIMOUSIN.POITOU-CHARENTES" )
+
+for s in ${sourcePop[@]}; do
+cd ${wrkDir}/qpAdm/aDNAMedieval/onePop/
+mkdir $s/
+mkdir $s/output
+
+for target in ${FRPOPS[@]}; do
+cd ${wrkDir}/qpAdm/aDNAMedieval/onePop/
+echo $target > $s/$target.reference.pop
+echo $s >> $s/$target.reference.pop
+
+#aDNA medieval
+(
+echo "genotypename:    $dataDir/$inputName.geno"
+echo "snpname:         $dataDir/$inputName.snp"
+echo "indivname:       $dataDir/$inputName.fr25.ind"
+echo "popleft:         $wrkDir/qpAdm/aDNAMedieval/onePop/$s/$target.reference.pop"
+echo "popright:        $rightPops"
+echo "details: YES"
+) > $s/par.qpAdm.OnePop.${s}.${target}.par
+
+cd 
+echo "/LAB-DATA/BiRD/users/alves-i/AdmixTools-master/bin/qpAdm -p $wrkDir/qpAdm/aDNAMedieval/onePop/${s}/par.qpAdm.OnePop.${s}.${target}.par > $wrkDir/qpAdm/aDNAMedieval/onePop/$s/output/par.qpAdm.OnePop.${s}.${target}.log" > $s.$target.bash
+chmod +x $s.$target.bash
+qsub -S /bin/bash -cwd ./$s.$target.bash
+done
+done
+
+# find -type d ! -name 'rightPops' -exec rm -rf '{}' \;
+```
+
+## Plotting results for the population continuity (onePop) qpAdm - Medieval FRENCH
+
+```{bash eval=FALSE}
+wrkDir="/sandbox/shares/mages/WGS_PREGO_Finistere_GAZEL/isabel/REICH_march2020/fstats/qpAdm/aDNAMedieval/onePop"
+cd $wrkDir
+if [ ! -d matrices/ ]; then
+echo "Creating folder to collect f4rank";
+mkdir matrices
+else 
+echo "Folder matrices already exists.";
+fi
+
+for dir in */; do 
+dir=${dir%/}; 
+if [ "$dir" != "matrices" ]; then
+echo "Collecting data from: $dir"; 
+for file in $dir/output/*.log;
+do 
+targetPop=`echo $file | sed "s/.*$dir.\(.*\).log/\1/"`
+pval=`cat $file | grep f4rank | sed -n 2p | awk '{print $14}'`
+echo "Fetching f4rank for target population: $targetPop";
+echo "Model p-value: $pval";
+echo ""
+echo "$targetPop $pval" >> matrices/$dir.f4rank;
+echo "$dir $pval" >> matrices/$targetPop.f4rank;
+done
+fi
+done
+
+```
+
+```{r echo=TRUE}
+library(randomcoloR)
+require(stringr)
+  set.seed(6)
+  wrkDir="/home/ialves/Dropbox/instDuThorax/REICH_SUPERDATASET_aDNA/PREGO/qpAdm/onePop/matrices"
+  setwd(wrkDir)
+  
+  FRPOPS=c("cluster2", "cluster1", "cluster3", "BASSE-NORMANDIE.HAUTE-NORMANDIE", "NORD-PAS-DE-CALAIS.PICARDIE", 
+           "ALSACE.LORRAINE", "CENTRE", "LIMOUSIN.POITOU-CHARENTES")
+  
+  publishNameFR <- c("WBR",  "EBP", "SLO", "NOR", "HAU", "GRA", "CEN", "NOU")
+  
+  
+  fileList <- list.files(path = wrkDir, pattern = "*.f4rank", full.names = T)
+  countryNames <- unlist(lapply(1:length(fileList), function(k) {unlist(strsplit(strsplit(fileList[k], split = "/")[[1]][length(strsplit(fileList[k], split = "/")[[1]])], split = "_"))[1]}))
+  
+  uniqCountries <- unique(countryNames)
+  if(sum(str_detect(uniqCountries, "FRMedieval.f4rank", negate = FALSE)) | sum(str_detect(uniqCountries, "Vikings.f4rank", negate = FALSE)) > 0) {
+    uniqCountries[which(str_detect(uniqCountries, "FRMedieval.f4rank", negate = FALSE))] <- "France"
+    countryNames[which(countryNames == "FRMedieval.f4rank")] <- "France"
+    uniqCountries[which(str_detect(uniqCountries, "Vikings.f4rank", negate = FALSE))] <- "Scandinavia"
+    countryNames[which(countryNames == "Vikings.f4rank")] <- "Scandinavia"
+  }
+  #setting pch
+  pchTypesSampled <- sample(1:20, length(uniqCountries))
+  pchType <- rep(NA,length(countryNames))
+  for(country in uniqCountries){
+    pchType[which(countryNames == country)] <- pchTypesSampled[which(uniqCountries == country)]
+  }
+  #setting colour
+  # if(length(countryNames) > 8) {
+  #   coloraPops <- brewer.pal(8, "Set3")
+  #   coloraPops <- c(coloraPops,brewer.pal(length(fileList)-8, "Set1"))
+  # } else {
+  #   coloraPops <- distinctColorPalette(length(fileList))
+  # }
+  coloraPops <- distinctColorPalette(length(fileList))
+  
+  png(filename = paste0(wrkDir, "/log10_modelPValue_1.png"), width = 10, 
+      height = 3, units = 'in', res = 300)
+  par(mar=c(4,4,1,1))
+  layout(matrix(c(1,2), ncol = 2, byrow = T), widths = c(3,1))
+  f4rank_l <- list()
+  for(fileNb in 1:length(fileList)){
+    openF <- read.table(fileList[fileNb], header = F)
+    openF <- openF[match(FRPOPS,openF[,1]),]
+    
+    aPOP <- unlist(strsplit(unlist(strsplit(fileList[fileNb], split = "/"))[length(unlist(strsplit(fileList[fileNb], split = "/")))], split="\\."))[1]
+    
+    f4rank_l[[aPOP]] <- as.vector(openF[,2])
+    names(f4rank_l[[aPOP]]) <-  as.vector(openF[,1]) 
+    if(fileNb == 1) {
+      plot(log10(f4rank_l[[aPOP]]), type = "b", col=coloraPops[fileNb], ylim=c(-130,0),
+           xlim = c(1,14), ylab = "log10(p-Value)", xaxt='n', xlab="", pch=pchType[fileNb], lwd=2)
+    } else {
+      lines(log10(f4rank_l[[aPOP]]), type = "b", col=coloraPops[fileNb], pch=pchType[fileNb], lwd=2)
+    }
+  }
+  axis(1, at=1:8, labels = substr(publishNameFR, start = 1, stop = 3), las=2, cex=1)
+  abline(h=log10(0.05), col="grey55",lwd=2)
+  legend("right", legend=names(f4rank_l), pch = pchType, lty = 1, col = coloraPops, 
+         bty = "n", cex = 0.7, pt.cex=1.2, pt.lwd = 1.2, lwd = 1.5)
+  
+  f4rank_l <- list()
+  for(fileNb in 1:length(fileList)){
+    openF <- read.table(fileList[fileNb], header = F)
+    openF <- openF[match(FRPOPS,openF[,1]),]
+    
+    aPOP <- unlist(strsplit(unlist(strsplit(fileList[fileNb], split = "/"))[length(unlist(strsplit(fileList[fileNb], split = "/")))], split="\\."))[1]
+    
+    f4rank_l[[aPOP]] <- as.vector(openF[,2])
+    if(sum(f4rank_l[[aPOP]] > 0.05) == 0){
+      coloraPops[fileNb] <- "grey95"
+    }
+    
+    par(mar=c(4,2,1,1))
+    names(f4rank_l[[aPOP]]) <-  as.vector(openF[,1]) 
+    if(fileNb == 1) {
+      plot(log10(f4rank_l[[aPOP]]), type = "b", col=coloraPops[fileNb], ylim=c(-10,0), ylab = "", xaxt='n',
+           xlab="", pch=pchType[fileNb], lwd=2)
+    } else {
+      lines(log10(f4rank_l[[aPOP]]), type = "b", col=coloraPops[fileNb], pch=pchType[fileNb], lwd=2)
+    }
+  }
+  axis(1, at=1:8, labels = substr(publishNameFR, start = 1, stop = 3), las=2, cex=0.75)
+  abline(h=log10(0.05), col="grey55", lwd=2)
+  #legend("right", legend=names(f4rank_l), pch = pchType, lty = 1, col = coloraPops, bty = "n", cex = 1, pt.cex=1.2, pt.lwd = 1.2)
+  dev.off()
+
+## prepare table with all the values
+wrkDir="/home/ialves/Dropbox/instDuThorax/REICH_SUPERDATASET_aDNA/PREGO/qpAdm/onePop/matrices/full_matrices"
+setwd(wrkDir)
+
+FRPOPS=c("cluster2", "cluster1", "cluster3", "BASSE-NORMANDIE.HAUTE-NORMANDIE", "NORD-PAS-DE-CALAIS.PICARDIE", 
+         "ALSACE.LORRAINE", "CENTRE", "LIMOUSIN.POITOU-CHARENTES")
+
+publishNameFR <- c("WBR",  "EBP", "SLO", "NOR", "HAU", "GRA", "CEN", "NOU")
+
+
+fileList <- list.files(path = wrkDir, pattern = "*.f4rank", full.names = T)
+countryNames <- unlist(lapply(1:length(fileList), function(k) {unlist(strsplit(strsplit(fileList[k], split = "/")[[1]][length(strsplit(fileList[k], split = "/")[[1]])], split = "_"))[1]}))
+
+uniqCountries <- unique(countryNames)
+if(sum(str_detect(uniqCountries, "FRMedieval.f4rank", negate = FALSE)) | sum(str_detect(uniqCountries, "Vikings.f4rank", negate = FALSE)) > 0) {
+  uniqCountries[which(str_detect(uniqCountries, "FRMedieval.f4rank", negate = FALSE))] <- "France"
+  countryNames[which(countryNames == "FRMedieval.f4rank")] <- "France"
+  uniqCountries[which(str_detect(uniqCountries, "Vikings.f4rank", negate = FALSE))] <- "Scandinavia"
+  countryNames[which(countryNames == "Vikings.f4rank")] <- "Scandinavia"
+}
+
+f4rank_l <- list()
+for(fileNb in 1:length(fileList)){
+  openF <- read.table(fileList[fileNb], header = F)
+  openF <- openF[match(FRPOPS,openF[,1]),]
+  
+  aPOP <- unlist(strsplit(unlist(strsplit(fileList[fileNb], split = "/"))[length(unlist(strsplit(fileList[fileNb], split = "/")))], split="\\."))[1]
+  
+  f4rank_l[[aPOP]] <- as.vector(openF[,2])
+}
+f4rank_matrix <- do.call(rbind, f4rank_l)
+colnames(f4rank_matrix) <- publishNameFR
+write.table(f4rank_matrix, file = paste0(wrkDir, "/f4rank_pvalues.txt"), quote = F, row.names = T, col.names = T, sep = "\t")
+
+```
+## Compute f3 outgroup (Mbuti, MODERN French, aWestEurope)
+
+Here I compute the ancient population sharing the largest drift with the modern French. This includes Medieval French populations. 
+
+```{bash eval=FALSE}
+wrkDir="/sandbox/shares/mages/WGS_PREGO_Finistere_GAZEL/isabel/REICH_march2020"
+cd $wrkDir
+
+#mkdir fstats/f3/PREGO
+#mkdir fstats/f3/PREGO/input
+#mkdir fstats/f3/PREGO/output
+
+inputName="fr_vk_1240kHO_WHG_SP_sixMedieval"
+
+#generating list of comparisons
+FRPOPS=("cluster1" "cluster2" "cluster3" "CENTRE" \
+"LIMOUSIN.POITOU-CHARENTES" "BASSE-NORMANDIE.HAUTE-NORMANDIE" \
+"NORD-PAS-DE-CALAIS.PICARDIE" "ALSACE.LORRAINE")
+
+aWESTEUR=( "Italy_Imperial.SG" "Iberia_Roman" "England_Roman.SG" "England_LIA.SG" "Germany_LRoman.SG" "FRMedieval" "Italy_Medieval_EarlyModern_oCentralEuropean.SG" "Italy_Medieval_EarlyModern.SG" "Italy_North_EarlyMedieval_Langobards" "Germany_EMedieval.SG" "Iberia_Medieval_published" "Iceland_Early_Christian.SG" "Vikings" "England_Saxon.SG" "Iberia_IA" "Iberia_Celtiberian" "England_Roman.SG"  "Iceland_Pre_Christian.SG" "England_LIA_ERoman.SG" "England_IA.SG" "Czech_BellBeaker" "England_BellBeaker" "France_BellBeaker" "France_BellBeaker_lowSteppe" "Germany_BellBeaker" "Germany_Lech_BellBeaker" "Hungary_EBA_BellBeaker" "Iberia_BellBeaker" "Italy_North_BellBeaker" "Netherlands_BellBeaker" "Poland_BellBeaker" "Scotland_BellBeaker" "Switzerland_BellBeaker" "Iberia_MBA.SG" "Iberia_BA" "Iberia_C_BA" "Iberia_C" "Iberia_EBA" "England_C_EBA" "England_LBA" "England_MBA" "Wales_C.SG" "Scotland_C_EBA" "Scotland_LBA" "Scotland_MBA" "Germany_BA.SG" "Germany_CordedWare" "Germany_EBA_Unetice" "Germany_Lech_EBA" "Germany_LBA_Halberstadt_published" "Germany_Lech_MBA" "Denmark_BA.SG" "Denmark_LBA.SG" "Italy_C_BA.SG" "Italy_C.SG" "Italy_North_Remedello_C.SG" "Italy_North_Remedello_EBA.SG")
+
+#"Italy_LA.SG" removed as it is not in the dataset: fr_vk_1240kHO_WHG_SP_sixMedieval.fr25.ind I may have forgotten
+outgroup="Mbuti"
+
+for cpop in ${FRPOPS[@]}; 
+do
+  cd $wrkDir
+  for pop in ${aWESTEUR[@]}; do 
+	  echo "$cpop $pop $outgroup" >> fstats/f3/PREGO/input/list_f3outgroup_aDNA_${outgroup}_${cpop}.txt; 
+	  #generating par file 
+  done; 
+  (
+  echo "genotypename:    /sandbox/shares/mages/WGS_PREGO_Finistere_GAZEL/isabel/FR_aDNA_medieval/calling_HOA/mergeHOA/$inputName.geno"
+  echo "snpname:         /sandbox/shares/mages/WGS_PREGO_Finistere_GAZEL/isabel/FR_aDNA_medieval/calling_HOA/mergeHOA/$inputName.snp"
+  echo "indivname:       /sandbox/shares/mages/WGS_PREGO_Finistere_GAZEL/isabel/FR_aDNA_medieval/calling_HOA/mergeHOA/$inputName.fr25.ind"
+  echo "popfilename:     $wrkDir/fstats/f3/PREGO/input/list_f3outgroup_aDNA_${outgroup}_${cpop}.txt"
+  ) > fstats/f3/PREGO/input/par.f3testOutgroup_aDNA_${outgroup}_${cpop}_sour2.par
+
+  cd 
+  AdmixTools/bin/qp3Pop \
+  -p $wrkDir/fstats/f3/PREGO/input/par.f3testOutgroup_aDNA_${outgroup}_${cpop}_sour2.par \
+  > $wrkDir/fstats/f3/PREGO/output/f3Out_aDNA_${cpop}.log
+done
+
+```
+
+## Compute f3 outgroup (Mbuti, MEDIEVAL French, aWestEurope)
+
+Here I compute the ancient population sharing the largest drift with Medieval French. 
+
+```{bash eval=FALSE}
+wrkDir="/sandbox/shares/mages/WGS_PREGO_Finistere_GAZEL/isabel/REICH_march2020"
+cd $wrkDir
+
+#mkdir fstats/f3/PREGO
+#mkdir fstats/f3/PREGO/input
+#mkdir fstats/f3/PREGO/output
+
+inputName="fr_vk_1240kHO_WHG_SP_sixMedieval"
+
+#generating list of comparisons
+FRPOPS=( "FRMedieval" )
+
+aWESTEUR=( "Italy_Imperial.SG" "Iberia_Roman" "England_Roman.SG" "England_LIA.SG" "Germany_LRoman.SG" "Italy_Medieval_EarlyModern_oCentralEuropean.SG" "Italy_Medieval_EarlyModern.SG" "Italy_North_EarlyMedieval_Langobards" "Germany_EMedieval.SG" "Iberia_Medieval_published" "Iceland_Early_Christian.SG" "Vikings" "England_Saxon.SG" "Iberia_IA" "Iberia_Celtiberian" "England_Roman.SG"  "Iceland_Pre_Christian.SG" "England_LIA_ERoman.SG" "England_IA.SG" "Czech_BellBeaker" "England_BellBeaker" "France_BellBeaker" "France_BellBeaker_lowSteppe" "Germany_BellBeaker" "Germany_Lech_BellBeaker" "Hungary_EBA_BellBeaker" "Iberia_BellBeaker" "Italy_North_BellBeaker" "Netherlands_BellBeaker" "Poland_BellBeaker" "Scotland_BellBeaker" "Switzerland_BellBeaker" "Iberia_MBA.SG" "Iberia_BA" "Iberia_C_BA" "Iberia_C" "Iberia_EBA" "England_C_EBA" "England_LBA" "England_MBA" "Wales_C.SG" "Scotland_C_EBA" "Scotland_LBA" "Scotland_MBA" "Germany_BA.SG" "Germany_CordedWare" "Germany_EBA_Unetice" "Germany_Lech_EBA" "Germany_LBA_Halberstadt_published" "Germany_Lech_MBA" "Denmark_BA.SG" "Denmark_LBA.SG" "Italy_C_BA.SG" "Italy_C.SG" "Italy_North_Remedello_C.SG" "Italy_North_Remedello_EBA.SG" )
+
+#"Italy_LA.SG" removed as it is not in the dataset: fr_vk_1240kHO_WHG_SP_sixMedieval.fr25.ind I may have forgotten
+outgroup="Mbuti"
+
+for cpop in ${FRPOPS[@]}; 
+do
+  cd $wrkDir
+  for pop in ${aWESTEUR[@]}; do 
+	  echo "$cpop $pop $outgroup" >> fstats/f3/PREGO/input/list_f3outgroup_aDNA_${outgroup}_${cpop}.txt; 
+	  #generating par file 
+  done; 
+  (
+  echo "genotypename:    /sandbox/shares/mages/WGS_PREGO_Finistere_GAZEL/isabel/FR_aDNA_medieval/calling_HOA/mergeHOA/$inputName.geno"
+  echo "snpname:         /sandbox/shares/mages/WGS_PREGO_Finistere_GAZEL/isabel/FR_aDNA_medieval/calling_HOA/mergeHOA/$inputName.snp"
+  echo "indivname:       /sandbox/shares/mages/WGS_PREGO_Finistere_GAZEL/isabel/FR_aDNA_medieval/calling_HOA/mergeHOA/$inputName.fr25.ind"
+  echo "popfilename:     $wrkDir/fstats/f3/PREGO/input/list_f3outgroup_aDNA_${outgroup}_${cpop}.txt"
+  ) > fstats/f3/PREGO/input/par.f3testOutgroup_aDNA_${outgroup}_${cpop}_sour2.par
+
+  cd 
+  AdmixTools/bin/qp3Pop \
+  -p $wrkDir/fstats/f3/PREGO/input/par.f3testOutgroup_aDNA_${outgroup}_${cpop}_sour2.par \
+  > $wrkDir/fstats/f3/PREGO/output/f3Out_aDNA_${cpop}.log
+done
+
+```
+
+
+
+## Compute f3 admixture (MODERN FRENCH; MEDIEVAL French, aWestEurope)
+
+Here I compute the ancient population sharing the largest drift with Medieval French. 
+
+```{bash eval=FALSE}
+wrkDir="/sandbox/shares/mages/WGS_PREGO_Finistere_GAZEL/isabel/REICH_march2020"
+cd $wrkDir
+
+#mkdir fstats/f3/PREGO
+#mkdir fstats/f3/PREGO/input
+#mkdir fstats/f3/PREGO/output
+
+inputName="fr_vk_1240kHO_WHG_SP_sixMedieval"
+
+#generating list of comparisons
+FRPOPS=("cluster1" "cluster2" "cluster3" "CENTRE" "LIMOUSIN.POITOU-CHARENTES" "BASSE-NORMANDIE.HAUTE-NORMANDIE" "NORD-PAS-DE-CALAIS.PICARDIE" "ALSACE.LORRAINE")
+
+#generating list of comparisons
+FRANC="FRMedieval"
+
+aWESTEUR=( "Italy_Imperial.SG" "Iberia_Roman" "England_Roman.SG" "England_LIA.SG" "Germany_LRoman.SG" "Italy_Medieval_EarlyModern_oCentralEuropean.SG" "Italy_Medieval_EarlyModern.SG" "Italy_North_EarlyMedieval_Langobards" "Germany_EMedieval.SG" "Iberia_Medieval_published" "Iceland_Early_Christian.SG" "Vikings" "England_Saxon.SG" "Iberia_IA" "Iberia_Celtiberian" "England_Roman.SG"  "Iceland_Pre_Christian.SG" "England_LIA_ERoman.SG" "England_IA.SG" "Czech_BellBeaker" "England_BellBeaker" "France_BellBeaker" "France_BellBeaker_lowSteppe" "Germany_BellBeaker" "Germany_Lech_BellBeaker" "Hungary_EBA_BellBeaker" "Iberia_BellBeaker" "Italy_North_BellBeaker" "Netherlands_BellBeaker" "Poland_BellBeaker" "Scotland_BellBeaker" "Switzerland_BellBeaker" "Iberia_MBA.SG" "Iberia_BA" "Iberia_C_BA" "Iberia_C" "Iberia_EBA" "England_C_EBA" "England_LBA" "England_MBA" "Wales_C.SG" "Scotland_C_EBA" "Scotland_LBA" "Scotland_MBA" "Germany_BA.SG" "Germany_CordedWare" "Germany_EBA_Unetice" "Germany_Lech_EBA" "Germany_LBA_Halberstadt_published" "Germany_Lech_MBA" "Denmark_BA.SG" "Denmark_LBA.SG" "Italy_C_BA.SG" "Italy_C.SG" "Italy_North_Remedello_C.SG" "Italy_North_Remedello_EBA.SG" )
+
+for cpop in ${FRPOPS[@]}; 
+do
+  cd $wrkDir
+  for pop in ${aWESTEUR[@]}; do 
+	  echo "$FRANC $pop $cpop" >> fstats/f3/PREGO/input/list_f3adm_aDNA_${cpop}_${FRANC}.txt; 
+	  #generating par file 
+  done; 
+  (
+  echo "genotypename:    /sandbox/shares/mages/WGS_PREGO_Finistere_GAZEL/isabel/FR_aDNA_medieval/calling_HOA/mergeHOA/$inputName.geno"
+  echo "snpname:         /sandbox/shares/mages/WGS_PREGO_Finistere_GAZEL/isabel/FR_aDNA_medieval/calling_HOA/mergeHOA/$inputName.snp"
+  echo "indivname:       /sandbox/shares/mages/WGS_PREGO_Finistere_GAZEL/isabel/FR_aDNA_medieval/calling_HOA/mergeHOA/$inputName.fr25.ind"
+  echo "popfilename:     $wrkDir/fstats/f3/PREGO/input/list_f3adm_aDNA_${cpop}_${FRANC}.txt"
+  ) > fstats/f3/PREGO/input/par.f3adm_aDNA_${cpop}_${FRANC}_sour2.par
+
+  cd 
+  AdmixTools/bin/qp3Pop \
+  -p $wrkDir/fstats/f3/PREGO/input/par.f3adm_aDNA_${cpop}_${FRANC}_sour2.par \
+  > $wrkDir/fstats/f3/PREGO/output/f3Out_aDNA_${cpop}_${FRANC}_sour2.log
+done
+
+```
+
+## Compute Dstatistics in the form of D(Mbuti, test; cluster2, any other french population)
+
+```{bash eval=FALSE}
+wrkDir="/sandbox/shares/mages/WGS_PREGO_Finistere_GAZEL/isabel/REICH_march2020"
+cd $wrkDir
+
+#mkdir fstats/f3/PREGO
+#mkdir fstats/f3/PREGO/input
+#mkdir fstats/f3/PREGO/output
+
+inputName="fr_vk_1240kHO_WHG_SP_sixMedieval"
+
+#generating list of comparisons
+fixedPop="cluster2"
+outlier="Mbuti"
+
+#generating list of comparisons
+FRPOPS=("cluster1" "cluster3" "CENTRE" "LIMOUSIN.POITOU-CHARENTES" "BASSE-NORMANDIE.HAUTE-NORMANDIE" "NORD-PAS-DE-CALAIS.PICARDIE" "ALSACE.LORRAINE")
+
+test=( "Italy_Imperial.SG" "Iberia_Roman" "England_Roman.SG" "England_LIA.SG" "Germany_LRoman.SG" "Italy_Medieval_EarlyModern_oCentralEuropean.SG" "Italy_Medieval_EarlyModern.SG" "Italy_North_EarlyMedieval_Langobards" "Germany_EMedieval.SG" "Iberia_Medieval_published" "Iceland_Early_Christian.SG" "Vikings" "England_Saxon.SG" "Iberia_IA" "Iberia_Celtiberian" "England_Roman.SG"  "Iceland_Pre_Christian.SG" "England_LIA_ERoman.SG" "England_IA.SG" "Czech_BellBeaker" "England_BellBeaker" "France_BellBeaker" "France_BellBeaker_lowSteppe" "Germany_BellBeaker" "Germany_Lech_BellBeaker" "Hungary_EBA_BellBeaker" "Iberia_BellBeaker" "Italy_North_BellBeaker" "Netherlands_BellBeaker" "Poland_BellBeaker" "Scotland_BellBeaker" "Switzerland_BellBeaker" "Iberia_MBA.SG" "Iberia_BA" "Iberia_C_BA" "Iberia_C" "Iberia_EBA" "England_C_EBA" "England_LBA" "England_MBA" "Wales_C.SG" "Scotland_C_EBA" "Scotland_LBA" "Scotland_MBA" "Germany_BA.SG" "Germany_CordedWare" "Germany_EBA_Unetice" "Germany_Lech_EBA" "Germany_LBA_Halberstadt_published" "Germany_Lech_MBA" "Denmark_BA.SG" "Denmark_LBA.SG" "Italy_C_BA.SG" "Italy_C.SG" "Italy_North_Remedello_C.SG" "Italy_North_Remedello_EBA.SG" "Ireland_BA.SG")
+
+for t in ${test[@]}; do 
+  for fr in ${FRPOPS[@]}; do
+  echo "$outlier $t $fixedPop $fr" >> fstats/f4/PREGO/input/list_Dstats_${outlier}_aDNAtest_${fixedPop}_otherFR.txt; 
+  #generating par file 
+  done
+done; 
+(
+echo "genotypename:    /sandbox/shares/mages/WGS_PREGO_Finistere_GAZEL/isabel/FR_aDNA_medieval/calling_HOA/mergeHOA/$inputName.geno"
+echo "snpname:         /sandbox/shares/mages/WGS_PREGO_Finistere_GAZEL/isabel/FR_aDNA_medieval/calling_HOA/mergeHOA/$inputName.snp"
+echo "indivname:       /sandbox/shares/mages/WGS_PREGO_Finistere_GAZEL/isabel/FR_aDNA_medieval/calling_HOA/mergeHOA/$inputName.fr25.ind"
+echo "popfilename:     $wrkDir/fstats/f4/PREGO/input/list_Dstats_${outlier}_aDNAtest_${fixedPop}_otherFR.txt"
+) > fstats/f4/PREGO/input/par.Dstats_${outlier}_aDNAtest_${fixedPop}_otherFR.par
+
+cd 
+AdmixTools/bin/qpDstat \
+-p $wrkDir/fstats/f4/PREGO/input/par.Dstats_${outlier}_aDNAtest_${fixedPop}_otherFR.par \
+> $wrkDir/fstats/f4/PREGO/output/par.Dstats_${outlier}_aDNAtest_${fixedPop}_otherFR.log
+
+```
+
+## Compute Dstats in the form of D(Mbuti, test; cluster2/other mFr, FrMedieval)
+
+```{bash eval=FALSE}
+wrkDir="/sandbox/shares/mages/WGS_PREGO_Finistere_GAZEL/isabel/REICH_march2020"
+#cd $wrkDir
+
+#mkdir fstats/f3/PREGO
+#mkdir fstats/f3/PREGO/input
+#mkdir fstats/f3/PREGO/output
+
+inputName="fr_vk_1240kHO_WHG_SP_sixMedieval"
+
+#generating list of comparisons
+outlier="Mbuti"
+Dpop=("FRMedieval")
+
+#generating list of comparisons
+FRPOPS=("cluster1" "cluster2" "cluster3" "CENTRE" "LIMOUSIN.POITOU-CHARENTES" "BASSE-NORMANDIE.HAUTE-NORMANDIE" "NORD-PAS-DE-CALAIS.PICARDIE" "ALSACE.LORRAINE")
+
+test=( "Italy_Imperial.SG" "Iberia_Roman" "England_LIA.SG" "Germany_LRoman.SG" "Italy_Medieval_EarlyModern_oCentralEuropean.SG" "Italy_Medieval_EarlyModern.SG" "Italy_North_EarlyMedieval_Langobards" "Germany_EMedieval.SG" "Iberia_Medieval_published" "Iceland_Early_Christian.SG" "Vikings" "England_Saxon.SG" "Iberia_IA" "Iberia_Celtiberian" "England_Roman.SG"  "Iceland_Pre_Christian.SG" "England_LIA_ERoman.SG" "England_IA.SG" "Czech_BellBeaker" "England_BellBeaker" "France_BellBeaker" "France_BellBeaker_lowSteppe" "Germany_BellBeaker" "Germany_Lech_BellBeaker" "Hungary_EBA_BellBeaker" "Iberia_BellBeaker" "Italy_North_BellBeaker" "Netherlands_BellBeaker" "Poland_BellBeaker" "Scotland_BellBeaker" "Switzerland_BellBeaker" "Iberia_MBA.SG" "Iberia_BA" "Iberia_C_BA" "Iberia_C" "Iberia_EBA" "England_C_EBA" "England_LBA" "England_MBA" "Wales_C.SG" "Scotland_C_EBA" "Scotland_LBA" "Scotland_MBA" "Germany_BA.SG" "Germany_CordedWare" "Germany_EBA_Unetice" "Germany_Lech_EBA" "Germany_LBA_Halberstadt_published" "Germany_Lech_MBA" "Denmark_BA.SG" "Denmark_LBA.SG" "Italy_C_BA.SG" "Italy_C.SG" "Italy_North_Remedello_C.SG" "Italy_North_Remedello_EBA.SG" "Ireland_BA.SG")
+
+for fr in ${FRPOPS[@]};
+do 
+cd $wrkDir
+for t in ${test[@]}; do 
+  echo "$outlier $t $fr $Dpop" >> fstats/f4/PREGO/input/list_Dstats_${outlier}_aDNAtest_${fr}_${Dpop}.txt; 
+  #generating par file 
+  done;
+(
+echo "genotypename:    /sandbox/shares/mages/WGS_PREGO_Finistere_GAZEL/isabel/FR_aDNA_medieval/calling_HOA/mergeHOA/$inputName.geno"
+echo "snpname:         /sandbox/shares/mages/WGS_PREGO_Finistere_GAZEL/isabel/FR_aDNA_medieval/calling_HOA/mergeHOA/$inputName.snp"
+echo "indivname:       /sandbox/shares/mages/WGS_PREGO_Finistere_GAZEL/isabel/FR_aDNA_medieval/calling_HOA/mergeHOA/$inputName.fr25.ind"
+echo "popfilename:     $wrkDir/fstats/f4/PREGO/input/list_Dstats_${outlier}_aDNAtest_${fr}_${Dpop}.txt"
+) > fstats/f4/PREGO/input/par.Dstats_${outlier}_aDNAtest_${fr}_${Dpop}.par
+
+cd 
+AdmixTools/bin/qpDstat \
+-p $wrkDir/fstats/f4/PREGO/input/par.Dstats_${outlier}_aDNAtest_${fr}_${Dpop}.par \
+> $wrkDir/fstats/f4/PREGO/output/par.Dstats_${outlier}_aDNAtest_${fr}_${Dpop}.log
+done
+```
+
+## Compute Dstatistics in the form of D(Mbuti, cluster2/other mFr; England_BellBeaker, France_BellBeaker)
+
+```{bash eval=FALSE}
+wrkDir="/sandbox/shares/mages/WGS_PREGO_Finistere_GAZEL/isabel/REICH_march2020"
+cd $wrkDir
+
+#generating list of comparisons
+FRPOPS=("cluster1" "cluster2" "cluster3" "CENTRE" "LIMOUSIN.POITOU-CHARENTES" "BASSE-NORMANDIE.HAUTE-NORMANDIE" "NORD-PAS-DE-CALAIS.PICARDIE" "ALSACE.LORRAINE")
+
+mkdir fstats/f4/PREGO/input/BellBeakers_vs_BellBeakers
+
+inputName="fr_vk_1240kHO_WHG_SP_sixMedieval"
+
+for fr in ${FRPOPS[@]};
+do
+
+  bellBeakers=("Czech_BellBeaker" "England_BellBeaker" "France_BellBeaker" "France_BellBeaker_lowSteppe" "Germany_BellBeaker" "Germany_Lech_BellBeaker" "Hungary_EBA_BellBeaker" "Iberia_BellBeaker" "Italy_North_BellBeaker" "Netherlands_BellBeaker" "Poland_BellBeaker" "Scotland_BellBeaker" "Switzerland_BellBeaker")
+  #generating list of comparisons
+  outlier="Mbuti"
+  leftBB=("${bellBeakers[@]}")
+  for bb in ${bellBeakers[@]}; do 
+    Cpop=$bb
+    leftBB=("${leftBB[@]:1}")
+    for remain in ${leftBB[@]}; do
+      Dpop=$remain
+      if [ "$Dpop" != "$Cpop" ]; then
+        #generating list of comparisons
+        echo "$outlier $fr $Cpop $Dpop" >> fstats/f4/PREGO/input/BellBeakers_vs_BellBeakers/list_Dstats_${outlier}_${fr}_BBX_BBY.txt; 
+      fi
+#generating par file 
+    done
+  done
+(
+echo "genotypename:    /sandbox/shares/mages/WGS_PREGO_Finistere_GAZEL/isabel/FR_aDNA_medieval/calling_HOA/mergeHOA/$inputName.geno"
+echo "snpname:         /sandbox/shares/mages/WGS_PREGO_Finistere_GAZEL/isabel/FR_aDNA_medieval/calling_HOA/mergeHOA/$inputName.snp"
+echo "indivname:       /sandbox/shares/mages/WGS_PREGO_Finistere_GAZEL/isabel/FR_aDNA_medieval/calling_HOA/mergeHOA/$inputName.fr25.ind"
+echo "popfilename:     $wrkDir/fstats/f4/PREGO/input/BellBeakers_vs_BellBeakers/list_Dstats_${outlier}_${fr}_BBX_BBY.txt"
+) > fstats/f4/PREGO/input/BellBeakers_vs_BellBeakers/par.Dstats_${outlier}_${fr}_BBX_BBY.par
+
+done
+#AdmixTools/bin/qpDstat \
+#-p $wrkDir/fstats/f4/PREGO/input/BellBeakers_vs_BellBeakers/par.Dstats_${outlier}_${fr}_${Cpop}_${Dpop}.par \
+#> $wrkDir/fstats/f4/PREGO/input/BellBeakers_vs_BellBeakers/par.Dstats_${outlier}_${fr}_${Cpop}_${Dpop}.log
+
+```
+
+## Compute Dstats in the form of D(Mbuti, test; cluster2, England_Roman.SG/England_Saxon.SG)
+
+```{bash eval=FALSE}
+wrkDir="/sandbox/shares/mages/WGS_PREGO_Finistere_GAZEL/isabel/REICH_march2020"
+cd $wrkDir
+
+#mkdir fstats/f3/PREGO
+#mkdir fstats/f3/PREGO/input
+#mkdir fstats/f3/PREGO/output
+
+inputName="fr_vk_1240kHO_WHG_SP_sixMedieval"
+
+#generating list of comparisons
+fixedPop="cluster2"
+outlier="Mbuti"
+
+#generating list of comparisons
+FRPOPS=("England_Roman.SG" "England_Saxon.SG")
+
+test=( "Italy_Imperial.SG" "Iberia_Roman" "England_Roman.SG" "England_LIA.SG" "Germany_LRoman.SG" "Italy_Medieval_EarlyModern_oCentralEuropean.SG" "Italy_Medieval_EarlyModern.SG" "Italy_North_EarlyMedieval_Langobards" "Germany_EMedieval.SG" "Iberia_Medieval_published" "Iceland_Early_Christian.SG" "Vikings" "England_Saxon.SG" "Iberia_IA" "Iberia_Celtiberian" "England_Roman.SG"  "Iceland_Pre_Christian.SG" "England_LIA_ERoman.SG" "England_IA.SG" "Czech_BellBeaker" "England_BellBeaker" "France_BellBeaker" "France_BellBeaker_lowSteppe" "Germany_BellBeaker" "Germany_Lech_BellBeaker" "Hungary_EBA_BellBeaker" "Iberia_BellBeaker" "Italy_North_BellBeaker" "Netherlands_BellBeaker" "Poland_BellBeaker" "Scotland_BellBeaker" "Switzerland_BellBeaker" "Iberia_MBA.SG" "Iberia_BA" "Iberia_C_BA" "Iberia_C" "Iberia_EBA" "England_C_EBA" "England_LBA" "England_MBA" "Wales_C.SG" "Scotland_C_EBA" "Scotland_LBA" "Scotland_MBA" "Germany_BA.SG" "Germany_CordedWare" "Germany_EBA_Unetice" "Germany_Lech_EBA" "Germany_LBA_Halberstadt_published" "Germany_Lech_MBA" "Denmark_BA.SG" "Denmark_LBA.SG" "Italy_C_BA.SG" "Italy_C.SG" "Italy_North_Remedello_C.SG" "Italy_North_Remedello_EBA.SG" )
+
+for t in ${test[@]}; do 
+  for fr in ${FRPOPS[@]}; do
+  if [ "$t" != "$fr" ]; then
+  echo "$outlier $t $fixedPop $fr" >> fstats/f4/PREGO/input/list_Dstats_${outlier}_aDNAtest_${fixedPop}_EnglandaDNA.txt; 
+  #generating par file 
+  fi
+  done
+done; 
+(
+echo "genotypename:    /sandbox/shares/mages/WGS_PREGO_Finistere_GAZEL/isabel/FR_aDNA_medieval/calling_HOA/mergeHOA/$inputName.geno"
+echo "snpname:         /sandbox/shares/mages/WGS_PREGO_Finistere_GAZEL/isabel/FR_aDNA_medieval/calling_HOA/mergeHOA/$inputName.snp"
+echo "indivname:       /sandbox/shares/mages/WGS_PREGO_Finistere_GAZEL/isabel/FR_aDNA_medieval/calling_HOA/mergeHOA/$inputName.fr25.ind"
+echo "popfilename:     $wrkDir/fstats/f4/PREGO/input/list_Dstats_${outlier}_aDNAtest_${fixedPop}_EnglandaDNA.txt"
+) > fstats/f4/PREGO/input/par.Dstats_${outlier}_aDNAtest_${fixedPop}_EnglandaDNA.par
+
+cd 
+AdmixTools/bin/qpDstat \
+-p $wrkDir/fstats/f4/PREGO/input/par.Dstats_${outlier}_aDNAtest_${fixedPop}_EnglandaDNA.par \
+> $wrkDir/fstats/f4/PREGO/output/par.Dstats_${outlier}_aDNAtest_${fixedPop}_EnglandaDNA.log
+
+```
+
+## Compute Dstats in the form of D(Mbuti, test; cluster2, FR_EMedieval)
+
+Here I test whether there are differences in allele sharing between WBR/FR_EMedieval and a test population (here an ancient sample). For that I created a new ind file (fr_vk_1240kHO_WHG_SP_sixMedieval.fr25.splitFrMed.ind ) where sample fra001 and fra004 are considered Early Medieval (FR_EMedieval) and fra016 and fra017 considered high middle ages (FR_HMedieval). 
+
+## Compute Dstats in the form of D(Mbuti, test; cluster2/other mFr, FR_EMedieval/FR_HMedieval)
+
+```{bash eval=FALSE}
+wrkDir="/sandbox/shares/mages/WGS_PREGO_Finistere_GAZEL/isabel/REICH_march2020"
+#cd $wrkDir
+
+#mkdir fstats/f3/PREGO
+#mkdir fstats/f3/PREGO/input
+#mkdir fstats/f3/PREGO/output
+
+inputName="fr_vk_1240kHO_WHG_SP_sixMedieval"
+
+#generating list of comparisons
+outlier="Mbuti"
+Dpop=("FR_HMedieval")
+
+#generating list of comparisons
+FRPOPS=("cluster1" "cluster2" "cluster3" "CENTRE" "LIMOUSIN.POITOU-CHARENTES" "BASSE-NORMANDIE.HAUTE-NORMANDIE" "NORD-PAS-DE-CALAIS.PICARDIE" "ALSACE.LORRAINE")
+
+test=( "Italy_Imperial.SG" "Iberia_Roman" "England_LIA.SG" "Germany_LRoman.SG" "Italy_Medieval_EarlyModern_oCentralEuropean.SG" "Italy_Medieval_EarlyModern.SG" "Italy_North_EarlyMedieval_Langobards" "Germany_EMedieval.SG" "Iberia_Medieval_published" "Iceland_Early_Christian.SG" "Vikings" "England_Saxon.SG" "Iberia_IA" "Iberia_Celtiberian" "England_Roman.SG"  "Iceland_Pre_Christian.SG" "England_LIA_ERoman.SG" "England_IA.SG" "Czech_BellBeaker" "England_BellBeaker" "France_BellBeaker" "France_BellBeaker_lowSteppe" "Germany_BellBeaker" "Germany_Lech_BellBeaker" "Hungary_EBA_BellBeaker" "Iberia_BellBeaker" "Italy_North_BellBeaker" "Netherlands_BellBeaker" "Poland_BellBeaker" "Scotland_BellBeaker" "Switzerland_BellBeaker" "Iberia_MBA.SG" "Iberia_BA" "Iberia_C_BA" "Iberia_C" "Iberia_EBA" "England_C_EBA" "England_LBA" "England_MBA" "Wales_C.SG" "Scotland_C_EBA" "Scotland_LBA" "Scotland_MBA" "Germany_BA.SG" "Germany_CordedWare" "Germany_EBA_Unetice" "Germany_Lech_EBA" "Germany_LBA_Halberstadt_published" "Germany_Lech_MBA" "Denmark_BA.SG" "Denmark_LBA.SG" "Italy_C_BA.SG" "Italy_C.SG" "Italy_North_Remedello_C.SG" "Italy_North_Remedello_EBA.SG" "Ireland_BA.SG")
+
+for fr in ${FRPOPS[@]};
+do 
+cd $wrkDir
+for t in ${test[@]}; do 
+  echo "$outlier $t $fr $Dpop" >> fstats/f4/PREGO/input/list_Dstats_${outlier}_aDNAtest_${fr}_${Dpop}.txt; 
+  #generating par file 
+  done;
+(
+echo "genotypename:    /sandbox/shares/mages/WGS_PREGO_Finistere_GAZEL/isabel/FR_aDNA_medieval/calling_HOA/mergeHOA/$inputName.geno"
+echo "snpname:         /sandbox/shares/mages/WGS_PREGO_Finistere_GAZEL/isabel/FR_aDNA_medieval/calling_HOA/mergeHOA/$inputName.snp"
+echo "indivname:       /sandbox/shares/mages/WGS_PREGO_Finistere_GAZEL/isabel/FR_aDNA_medieval/calling_HOA/mergeHOA/$inputName.fr25.splitFrMed.ind"
+echo "popfilename:     $wrkDir/fstats/f4/PREGO/input/list_Dstats_${outlier}_aDNAtest_${fr}_${Dpop}.txt"
+) > fstats/f4/PREGO/input/par.Dstats_${outlier}_aDNAtest_${fr}_${Dpop}.par
+
+cd 
+AdmixTools/bin/qpDstat \
+-p $wrkDir/fstats/f4/PREGO/input/par.Dstats_${outlier}_aDNAtest_${fr}_${Dpop}.par \
+> $wrkDir/fstats/f4/PREGO/output/par.Dstats_${outlier}_aDNAtest_${fr}_${Dpop}.log
+done
+```
+
+## Compute Dstats in the form of D(Mbuti, test; FR_EMedieval, FR_HMedieval)
+
+```{bash eval=FALSE}
+wrkDir="/sandbox/shares/mages/WGS_PREGO_Finistere_GAZEL/isabel/REICH_march2020"
+#cd $wrkDir
+
+#mkdir fstats/f3/PREGO
+#mkdir fstats/f3/PREGO/input
+#mkdir fstats/f3/PREGO/output
+
+inputName="fr_vk_1240kHO_WHG_SP_sixMedieval"
+
+#generating list of comparisons
+outlier="Mbuti"
+Dpop=("FR_HMedieval")
+
+#generating list of comparisons
+FRPOPS=("FR_EMedieval")
+
+test=( "Italy_Imperial.SG" "Iberia_Roman" "England_LIA.SG" "Germany_LRoman.SG" "Italy_Medieval_EarlyModern_oCentralEuropean.SG" "Italy_Medieval_EarlyModern.SG" "Italy_North_EarlyMedieval_Langobards" "Germany_EMedieval.SG" "Iberia_Medieval_published" "Iceland_Early_Christian.SG" "Vikings" "England_Saxon.SG" "Iberia_IA" "Iberia_Celtiberian" "England_Roman.SG"  "Iceland_Pre_Christian.SG" "England_LIA_ERoman.SG" "England_IA.SG" "Czech_BellBeaker" "England_BellBeaker" "France_BellBeaker" "France_BellBeaker_lowSteppe" "Germany_BellBeaker" "Germany_Lech_BellBeaker" "Hungary_EBA_BellBeaker" "Iberia_BellBeaker" "Italy_North_BellBeaker" "Netherlands_BellBeaker" "Poland_BellBeaker" "Scotland_BellBeaker" "Switzerland_BellBeaker" "Iberia_MBA.SG" "Iberia_BA" "Iberia_C_BA" "Iberia_C" "Iberia_EBA" "England_C_EBA" "England_LBA" "England_MBA" "Wales_C.SG" "Scotland_C_EBA" "Scotland_LBA" "Scotland_MBA" "Germany_BA.SG" "Germany_CordedWare" "Germany_EBA_Unetice" "Germany_Lech_EBA" "Germany_LBA_Halberstadt_published" "Germany_Lech_MBA" "Denmark_BA.SG" "Denmark_LBA.SG" "Italy_C_BA.SG" "Italy_C.SG" "Italy_North_Remedello_C.SG" "Italy_North_Remedello_EBA.SG" "Ireland_BA.SG")
+
+for fr in ${FRPOPS[@]};
+do 
+cd $wrkDir
+for t in ${test[@]}; do 
+  echo "$outlier $t $fr $Dpop" >> fstats/f4/PREGO/input/list_Dstats_${outlier}_aDNAtest_${fr}_${Dpop}.txt; 
+  #generating par file 
+  done;
+(
+echo "genotypename:    /sandbox/shares/mages/WGS_PREGO_Finistere_GAZEL/isabel/FR_aDNA_medieval/calling_HOA/mergeHOA/$inputName.geno"
+echo "snpname:         /sandbox/shares/mages/WGS_PREGO_Finistere_GAZEL/isabel/FR_aDNA_medieval/calling_HOA/mergeHOA/$inputName.snp"
+echo "indivname:       /sandbox/shares/mages/WGS_PREGO_Finistere_GAZEL/isabel/FR_aDNA_medieval/calling_HOA/mergeHOA/$inputName.fr25.splitFrMed.ind"
+echo "popfilename:     $wrkDir/fstats/f4/PREGO/input/list_Dstats_${outlier}_aDNAtest_${fr}_${Dpop}.txt"
+) > fstats/f4/PREGO/input/par.Dstats_${outlier}_aDNAtest_${fr}_${Dpop}.par
+
+cd 
+AdmixTools/bin/qpDstat \
+-p $wrkDir/fstats/f4/PREGO/input/par.Dstats_${outlier}_aDNAtest_${fr}_${Dpop}.par \
+> $wrkDir/fstats/f4/PREGO/output/par.Dstats_${outlier}_aDNAtest_${fr}_${Dpop}.log
+done
+```
+
+
+## Compute Dstats in the form of D(Mbuti, English_BellBeaker; WBR, England_Roman.SG)
+
+```{bash eval=FALSE}
+wrkDir="/sandbox/shares/mages/WGS_PREGO_Finistere_GAZEL/isabel/REICH_march2020"
+#cd $wrkDir
+
+#mkdir fstats/f3/PREGO
+#mkdir fstats/f3/PREGO/input
+#mkdir fstats/f3/PREGO/output
+
+inputName="fr_vk_1240kHO_WHG_SP_sixMedieval"
+
+#generating list of comparisons
+outlier="Mbuti"
+Dpop=("England_Roman.SG")
+
+#generating list of comparisons
+FRPOPS=("cluster2")
+
+test=( "England_LIA.SG" "England_LIA_ERoman.SG" "England_IA.SG" "Czech_BellBeaker" "England_BellBeaker" "France_BellBeaker" "France_BellBeaker_lowSteppe" "Germany_BellBeaker" "Germany_Lech_BellBeaker" "Hungary_EBA_BellBeaker" "Iberia_BellBeaker" "Italy_North_BellBeaker" "Netherlands_BellBeaker" "Poland_BellBeaker" "Scotland_BellBeaker" "Switzerland_BellBeaker" "Iberia_MBA.SG" "Iberia_BA" "Iberia_C_BA" "Iberia_C" "Iberia_EBA" "England_C_EBA" "England_LBA" "England_MBA" "Scotland_C_EBA" "Scotland_LBA" "Scotland_MBA" "Germany_BA.SG" "Germany_CordedWare" "Germany_EBA_Unetice" "Germany_Lech_EBA" "Germany_LBA_Halberstadt_published" "Germany_Lech_MBA" "Denmark_BA.SG" "Denmark_LBA.SG" "Italy_C_BA.SG" "Italy_North_Remedello_EBA.SG" "Ireland_BA.SG")
+
+for fr in ${FRPOPS[@]};
+do 
+cd $wrkDir
+for t in ${test[@]}; do 
+  echo "$outlier $t $fr $Dpop" >> fstats/f4/PREGO/input/list_Dstats_${outlier}_aDNAtest_${fr}_${Dpop}.txt; 
+  #generating par file 
+  done;
+(
+echo "genotypename:    /sandbox/shares/mages/WGS_PREGO_Finistere_GAZEL/isabel/FR_aDNA_medieval/calling_HOA/mergeHOA/$inputName.geno"
+echo "snpname:         /sandbox/shares/mages/WGS_PREGO_Finistere_GAZEL/isabel/FR_aDNA_medieval/calling_HOA/mergeHOA/$inputName.snp"
+echo "indivname:       /sandbox/shares/mages/WGS_PREGO_Finistere_GAZEL/isabel/FR_aDNA_medieval/calling_HOA/mergeHOA/$inputName.fr25.splitFrMed.ind"
+echo "popfilename:     $wrkDir/fstats/f4/PREGO/input/list_Dstats_${outlier}_aDNAtest_${fr}_${Dpop}.txt"
+) > fstats/f4/PREGO/input/par.Dstats_${outlier}_aDNAtest_${fr}_${Dpop}.par
+
+cd 
+AdmixTools/bin/qpDstat \
+-p $wrkDir/fstats/f4/PREGO/input/par.Dstats_${outlier}_aDNAtest_${fr}_${Dpop}.par \
+> $wrkDir/fstats/f4/PREGO/output/par.Dstats_${outlier}_aDNAtest_${fr}_${Dpop}.log
+done
+```
+
+### qpAdm - MODERN FRENCH 
+
+```{bash eval=FALSE}
+
+wrkDir="/sandbox/shares/mages/WGS_PREGO_Finistere_GAZEL/isabel/REICH_march2020/fstats"
+cd $wrkDir
+dataDir="/sandbox/shares/mages/WGS_PREGO_Finistere_GAZEL/isabel/FR_aDNA_medieval/calling_HOA/mergeHOA"
+
+if [ ! -d qpAdm/PREGO ]; then
+mkdir qpAdm/PREGO/
+mkdir qpAdm/PREGO/threeWay/
+else
+if [ ! -d qpAdm/PREGO/threeWay/ ]; then
+mkdir qpAdm/PREGO/threeWay/
+fi
+fi 
+
+cd qpAdm/PREGO/threeWay/
+
+inputName="fr_vk_1240kHO_WHG_SP_sixMedieval"
+rightPops="/sandbox/shares/mages/WGS_PREGO_Finistere_GAZEL/isabel/REICH_march2020/fstats/qpAdm/onePop/rightPops/right_pops.txt"
+sourcePop=( "SP" "EF" "HG" )
+#sourcePop=( "FRMedieval" "Italy_Medieval_EarlyModern_oCentralEuropean.SG" "Italy_Medieval_EarlyModern.SG" "Italy_North_EarlyMedieval_Langobards" "Germany_EMedieval.SG" "Iberia_Medieval_published" "Vikings" "England_Saxon.SG" "Iberia_IA" "Iberia_Celtiberian" "Iceland_Pre_Christian_Gaelic.SG" "Iceland_Pre_Christian_Norse.SG" "England_IA_LIA_Roman.SG" "England_Roman.SG")
+#Iceland_Pre_Christian_Gaelic.SG
+#Iceland_Pre_Christian_Norse.SG
+#"Iceland_Pre_Christian.SG" 
+#"England_LIA_ERoman.SG" "England_IA.SG"
+
+FRPOPS=( "cluster2" "cluster1" "cluster3" "BASSE-NORMANDIE.HAUTE-NORMANDIE" "NORD-PAS-DE-CALAIS.PICARDIE" "ALSACE.LORRAINE" "CENTRE" "LIMOUSIN.POITOU-CHARENTES" "FRMedieval")
+
+
+for fr in ${FRPOPS[@]}; do
+cd ${wrkDir}/qpAdm/PREGO/threeWay/
+mkdir $fr/
+mkdir $fr/output
+echo $fr > $fr/threeWay.sources.reference.pop
+
+for s in ${sourcePop[@]}; do
+echo $s >> $fr/threeWay.sources.reference.pop
+done
+#aDNA medieval
+(
+echo "genotypename:    $dataDir/$inputName.geno"
+echo "snpname:         $dataDir/$inputName.snp"
+echo "indivname:       $dataDir/$inputName.fr25.threeWay.ind"
+echo "popleft:         $wrkDir/qpAdm/PREGO/threeWay/$fr/threeWay.sources.reference.pop"
+echo "popright:        $rightPops"
+echo "details: YES"
+) > $fr/par.qpAdm.$fr.threeWay.par
+
+cd
+echo "/sandbox/users/alves-i/AdmixTools/bin/qpAdm -p $wrkDir/qpAdm/PREGO/threeWay/$fr/par.qpAdm.$fr.threeWay.par > $wrkDir/qpAdm/PREGO/threeWay/$fr/output/par.qpAdm.$fr.threeWay.log" > $fr.threeWay.bash
+chmod +x $fr.threeWay.bash
+qsub -S /bin/bash -cwd ./$fr.threeWay.bash
+done
+
+#locally
+cd /home/ialves/Dropbox/instDuThorax/REICH_SUPERDATASET_aDNA/PREGO/qpAdm/threeWay/
+FRPOPS=( "cluster2" "cluster1" "cluster3" "BASSE-NORMANDIE.HAUTE-NORMANDIE" "NORD-PAS-DE-CALAIS.PICARDIE" "ALSACE.LORRAINE" "CENTRE" "LIMOUSIN.POITOU-CHARENTES" "FRMedieval")
+echo SP$'\t'EF$'\t'WHG > qpAdmProp.txt
+echo SP$'\t'EF$'\t'WHG > qpAdmstdErrors.txt
+for dir in ${FRPOPS[@]}; do 
+echo $dir/;
+paste -d$'\t' <(echo $dir) <(grep "coefficients" $dir/output/par.qpAdm.$dir.threeWay.log | awk '{OFS="\t"; print $3,$4,$5}') >> qpAdmProp.txt
+paste -d$'\t' <(echo $dir) <(grep "std." $dir/output/par.qpAdm.$dir.threeWay.log | awk '{OFS="\t"; print $3,$4,$5}') >> qpAdmstdErrors.txt
+done
+# find -type d ! -name 'rightPops' -exec rm -rf '{}' \;
+```
+
+## Plot qpAdm proportion for modern and Medieval French samples. 
+
+```{r echo=TRUE}
+library(RColorBrewer)
+wrkDir="/home/ialves/Dropbox/instDuThorax/REICH_SUPERDATASET_aDNA/PREGO/qpAdm/threeWay"
+setwd(wrkDir)
+
+openProp <- read.table("qpAdmProp.txt", skip = 1)
+colnames(openProp) <- c("Population", "SP", "EF", "WHG")
+openSdtError <- read.table("qpAdmstdErrors.txt", skip=1)
+colnames(openSdtError) <- c("Population", "SP", "EF", "WHG")
+
+namesPops_pubOrder <- c("cluster2", "cluster1", "BASSE-NORMANDIE.HAUTE-NORMANDIE", "NORD-PAS-DE-CALAIS.PICARDIE",	"ALSACE.LORRAINE", "CENTRE",	"cluster3", "LIMOUSIN.POITOU-CHARENTES",	"FRMedieval")
+
+openProp <- openProp[match(namesPops_pubOrder, openProp$Population), ]
+openSdtError <- openSdtError[match(namesPops_pubOrder, openSdtError$Population), ]
+publishNameFR <- c("WBR",  "EBP", "NOR", "HAU", "GRA", "CEN", "SLO", "NOU", "FRMed")
+sizePlot <- prod(dim(openProp[,2:4]))+nrow(openProp)
+
+png(file=paste0(wrkDir, "/three-way_admixtureProp_modern_and_Medieval_FR_", Sys.Date(),".png"), height = 5, width = 7, units ='in', res = 200) #height = 620, width = 960, units = "in", res = 300
+#standard barplot with std errors
+barplot(t(data.frame(openProp[,2:4])), beside=T , legend.text=T, col=c( "mediumseagreen", "coral2", "lightslateblue") , ylim=c(0,1) , ylab="Proportion of ancestry", names.arg = publishNameFR, args.legend=list(bty='n'))
+arrows(c(seq(1,sizePlot, by = 4)+0.5, seq(2,sizePlot, by = 4)+0.5, seq(3,sizePlot, by = 4)+0.5),unlist(openProp[,2:4])+unlist(openSdtError[,2:4]), c(seq(1,sizePlot, by = 4)+0.5,seq(2,sizePlot, by = 4)+0.5,seq(3,sizePlot, by = 4)+0.5), unlist(openProp[,2:4])-unlist(openSdtError[,2:4]), angle=90, code=3, length = 0.05)
+dev.off()
+
+#stacked barplot
+png(file=paste0(wrkDir, "/three-way_admixtureProp_modern_and_Medieval_FR_stackedBarplot_", Sys.Date(), ".png"), height = 4, width = 4, units ='in', res = 200) #height = 620, width = 960, units = "in", res = 300
+par(mar=c(4,5,1,1))
+barplot(t(data.frame(openProp[,2:4]))[,rev(1:nrow(openProp))], horiz = T, legend.text=F, col=c( "mediumseagreen", "coral2", "lightslateblue"), xlim=c(0,1), xlab="Proportion of admixture", names.arg = publishNameFR, space=0, yaxt="n",  xaxt="n", cex.axis = 1.25, cex.lab = 1.25) #args.legend=list(bty='n'),
+axis(2, at = seq(0.5,8.5,by = 1), labels = rev(publishNameFR), las=2, cex.axis=1.25)
+axis(1, cex.axis=1.25)
+# arrows(c(openProp$SP-openSdtError$SP, openProp$EF-openSdtError$EF),rep((nrow(openProp):1)-0.5, each=2), c(openProp$SP+openSdtError$SP, openProp$EF+openSdtError$EF),
+#        rep((nrow(openProp):1)-0.5, each=2), angle=90, code=3, length = 0.05)
+dev.off()
+
+
+```
+
+
+
+## Compute Dstats in the form of D(English_BellBeaker, England_N; FRPOPS, England_Roman.SG)
+
+```{bash eval=FALSE}
+wrkDir="/sandbox/shares/mages/WGS_PREGO_Finistere_GAZEL/isabel/REICH_march2020"
+cd $wrkDir
+
+#mkdir fstats/f3/PREGO
+#mkdir fstats/f3/PREGO/input
+#mkdir fstats/f3/PREGO/output
+
+inputName="fr_vk_1240kHO_WHG_SP_sixMedieval"
+
+#generating list of comparisons
+outlier="Wales_C.SG"
+Dpop=("England_Roman.SG")
+
+
+#generating list of comparisons
+FRPOPS=( "cluster2" "cluster1" "cluster3" "BASSE-NORMANDIE.HAUTE-NORMANDIE" "NORD-PAS-DE-CALAIS.PICARDIE" "ALSACE.LORRAINE" "CENTRE" "LIMOUSIN.POITOU-CHARENTES" "FRMedieval" "Basque" "English" "Scottish" "Greek" "Hungarian" "Icelandic" "Italian_North" "Italian_South" "Norwegian" "Orcadian" "Spanish_North" "Spanish" "Sardinian")
+
+#test=( "Czech_BellBeaker" "England_BellBeaker" "France_BellBeaker" "France_BellBeaker_lowSteppe" "Germany_BellBeaker" "Germany_Lech_BellBeaker" "Hungary_EBA_BellBeaker" "Iberia_BellBeaker" "Italy_North_BellBeaker" "Netherlands_BellBeaker" "Poland_BellBeaker" "Scotland_BellBeaker" "Switzerland_BellBeaker" "Iberia_MBA.SG" "Iberia_BA" "Iberia_C_BA" "Iberia_C" "Iberia_EBA" "England_C_EBA" "England_LBA" "England_MBA" "Scotland_C_EBA" "Scotland_LBA" "Scotland_MBA" "Germany_BA.SG" "Germany_CordedWare" "Germany_EBA_Unetice" "Germany_Lech_EBA" "Germany_LBA_Halberstadt_published" "Germany_Lech_MBA" "Denmark_BA.SG" "Denmark_LBA.SG" "Italy_C_BA.SG" "Italy_North_Remedello_EBA.SG" "Ireland_BA.SG")
+
+test=( "Germany_BA.SG" "Germany_CordedWare" "Germany_EBA_Unetice" "Germany_Lech_EBA" "Germany_LBA_Halberstadt_published" "Germany_Lech_MBA" "Ireland_BA.SG")
+
+for t in ${test[@]};
+do 
+
+for fr in ${FRPOPS[@]}; do 
+  echo "$Dpop $fr $t $outlier" >> fstats/f4/PREGO/input/list_Dstats_${Dpop}_modFR_${t}_${outlier}.txt; 
+  #generating par file 
+  done;
+(
+echo "genotypename:    /sandbox/shares/mages/WGS_PREGO_Finistere_GAZEL/isabel/FR_aDNA_medieval/calling_HOA/mergeHOA/$inputName.geno"
+echo "snpname:         /sandbox/shares/mages/WGS_PREGO_Finistere_GAZEL/isabel/FR_aDNA_medieval/calling_HOA/mergeHOA/$inputName.snp"
+echo "indivname:       /sandbox/shares/mages/WGS_PREGO_Finistere_GAZEL/isabel/FR_aDNA_medieval/calling_HOA/mergeHOA/$inputName.fr25.ind"
+echo "popfilename:     $wrkDir/fstats/f4/PREGO/input/list_Dstats_${Dpop}_modFR_${t}_${outlier}.txt"
+echo "printsd:  YES"
+) > fstats/f4/PREGO/input/par.Dstats_${Dpop}_modFR_${t}_${outlier}.par
+
+#cd 
+#AdmixTools/bin/qpDstat \
+#-p $wrkDir/fstats/f4/PREGO/input/par.Dstats_${t}_England_N_modFR_${Dpop}.par \
+#> $wrkDir/fstats/f4/PREGO/input/par.Dstats_${t}_England_N_modFR_${Dpop}.log
+done
+```
+
+
+
+
+## Getting how many samples from different countries and periods
+
+```{bash eval=FALSE}
+wrkDir="/sandbox/users/alves-i/FR_WGS/REICH_march2020/SUBSET_finalPops"
+cd $wrkDir
+
+inFile="fr_vk_1240kHO_full.bis.ind"
+
+periods=("IA" "Celtiberian" "Medieval" "Saxon" "Roman" "Pre_Christian")
+
+for p in ${periods[@]}; do
+nbSamples=`cat fr_vk_1240kHO_full.bis.ind | awk '{print $3}' | grep $p | wc -l`;
+cat fr_vk_1240kHO_full.bis.ind | awk '{print $3}' | grep $p | sort -k2 | uniq -c
+echo "$p $nbSamples";
+echo "";
+done
+
+```
+
+## Compute f3 admixture (MODERN FRENCH; aWestEurope, all the remaining aWestEurope)
+
+Here I compute the ancient population sharing the largest drift with Medieval French. 
+
+```{bash eval=FALSE}
+wrkDir="/sandbox/shares/mages/WGS_PREGO_Finistere_GAZEL/isabel/REICH_march2020"
+cd $wrkDir
+
+#mkdir fstats/f3/PREGO
+#mkdir fstats/f3/PREGO/input
+#mkdir fstats/f3/PREGO/output
+
+inputName="fr_vk_1240kHO_WHG_SP_sixMedieval"
+
+#generating list of comparisons
+#FRPOPS=("cluster1" "cluster2" "cluster3" "CENTRE" "LIMOUSIN.POITOU-CHARENTES" "BASSE-NORMANDIE.HAUTE-NORMANDIE" "NORD-PAS-DE-CALAIS.PICARDIE" "ALSACE.LORRAINE")
+
+#FRPOPS=( "cluster2" "cluster1" "cluster3" "BASSE-NORMANDIE.HAUTE-NORMANDIE" "NORD-PAS-DE-CALAIS.PICARDIE" "ALSACE.LORRAINE" "CENTRE" "LIMOUSIN.POITOU-CHARENTES" )
+FRPOPS=( "FRMedieval" )
+for cpop in ${FRPOPS[@]}; 
+do
+  cd $wrkDir/fstats/f3Adm/PREGO/input/
+  mkdir ${cpop}/
+  mkdir ../output/${cpop}/
+  
+  aWESTEUR=( "Italy_Imperial.SG" "Iberia_Roman" "England_Roman.SG" "England_LIA.SG" "Germany_LRoman.SG" "Italy_Medieval_EarlyModern_oCentralEuropean.SG" "Italy_Medieval_EarlyModern.SG" "Italy_North_EarlyMedieval_Langobards" "Germany_EMedieval.SG" "Iberia_Medieval_published" "Iceland_Early_Christian.SG" "Vikings" "England_Saxon.SG" "Iberia_IA" "Iberia_Celtiberian" "England_Roman.SG"  "Iceland_Pre_Christian.SG" "England_LIA_ERoman.SG" "England_IA.SG" "Czech_BellBeaker" "England_BellBeaker" "France_BellBeaker" "France_BellBeaker_lowSteppe" "Germany_BellBeaker" "Germany_Lech_BellBeaker" "Hungary_EBA_BellBeaker" "Iberia_BellBeaker" "Italy_North_BellBeaker" "Netherlands_BellBeaker" "Poland_BellBeaker" "Scotland_BellBeaker" "Switzerland_BellBeaker" "Iberia_MBA.SG" "Iberia_BA" "Iberia_C_BA" "Iberia_C" "Iberia_EBA" "England_C_EBA" "England_LBA" "England_MBA" "Wales_C.SG" "Scotland_C_EBA" "Scotland_LBA" "Scotland_MBA" "Germany_BA.SG" "Germany_CordedWare" "Germany_EBA_Unetice" "Germany_Lech_EBA" "Germany_LBA_Halberstadt_published" "Germany_Lech_MBA" "Denmark_BA.SG" "Denmark_LBA.SG" "Italy_C_BA.SG" "Italy_C.SG" "Italy_North_Remedello_C.SG" "Italy_North_Remedello_EBA.SG" "Ireland_BA.SG" "England_N" "Ireland_MN.SG" "Scotland_N" "Wales_N" "Wales_LN" "France_MN" "Germany_LN_BenzigerodeHeimburg" "Germany_MN_Blatterhohle" "Denmark_LN.SG" )
+#"FRMedieval"
+remainingPops=("${aWESTEUR[@]:1}")
+  
+  for pop in ${aWESTEUR[@]}; do 
+
+    for fixedPop in ${remainingPops[@]}; do
+  	  if [ "$fixedPop" != "$pop" ]; then
+  	    echo "$fixedPop $pop $cpop" >> ${cpop}/list_f3adm_${cpop}_sour1_sour2.txt; 
+  	  fi
+  	done;
+    remainingPops=("${remainingPops[@]:1}")
+  done; 
+  #generating par file 
+  (
+  echo "genotypename:    /sandbox/shares/mages/WGS_PREGO_Finistere_GAZEL/isabel/FR_aDNA_medieval/calling_HOA/mergeHOA/$inputName.geno"
+  echo "snpname:         /sandbox/shares/mages/WGS_PREGO_Finistere_GAZEL/isabel/FR_aDNA_medieval/calling_HOA/mergeHOA/$inputName.snp"
+  echo "indivname:       /sandbox/shares/mages/WGS_PREGO_Finistere_GAZEL/isabel/FR_aDNA_medieval/calling_HOA/mergeHOA/$inputName.fr25.ind"
+  echo "popfilename:     $wrkDir/fstats/f3Adm/PREGO/input/${cpop}/list_f3adm_${cpop}_sour1_sour2.txt"
+  ) > ${cpop}/par.f3adm_${cpop}_sour1_sour2.par
+
+  cd 
+  echo "AdmixTools/bin/qp3Pop -p $wrkDir/fstats/f3Adm/PREGO/input/${cpop}/par.f3adm_${cpop}_sour1_sour2.par > $wrkDir/fstats/f3Adm/PREGO/output/${cpop}/par.f3adm_${cpop}_sour1_sour2.log" > f3Adm.${cpop}_sour1_sour2.bash
+done
+
+#for pop in ${FRPOPS[@]}; do echo $pop; echo ""; grep result: ../$pop/par.f3adm_${pop}_sour1_sour2.log | sort -k7 -n | head -10; echo ""; echo ""; done
+```
+
+## Compute Dstats in the form of D(Mbuti, UK_Neolithic; WBR, modFr + England_Roman.SG + "Ireland_BA.SG")
+
+```{bash eval=FALSE}
+wrkDir="/sandbox/shares/mages/WGS_PREGO_Finistere_GAZEL/isabel/REICH_march2020"
+#cd $wrkDir
+
+#mkdir fstats/f3/PREGO
+#mkdir fstats/f3/PREGO/input
+#mkdir fstats/f3/PREGO/output
+
+inputName="fr_vk_1240kHO_MesoMega"
+
+#generating list of comparisons
+outlier="Mbuti" #it shoulbe be Mbuti, CordedWare are here just to polarize the alleles
+Dpop=("cluster1" "cluster3" "BASSE-NORMANDIE.HAUTE-NORMANDIE" "NORD-PAS-DE-CALAIS.PICARDIE" "ALSACE.LORRAINE" "CENTRE" "LIMOUSIN.POITOU-CHARENTES" "FRMedieval" "England_Roman.SG" "England_IA.SG" "Ireland_BA.SG" "English")
+
+#generating list of comparisons
+FRPOPS=( "cluster1" "cluster3" "CENTRE" "LIMOUSIN.POITOU-CHARENTES" "BASSE-NORMANDIE.HAUTE-NORMANDIE" "NORD-PAS-DE-CALAIS.PICARDIE" "ALSACE.LORRAINE" ) #"cluster2"
+
+#test=( "Ireland_MN.SG" "Wales_N" "England_N" "Scotland_N" "Iberia_N_C" "Italy_N.SG" "Germany_MN_Blatterhohle" )
+test=( "Wales_Mesolithic" "England_Mesolithic_all.SG" "Scotland_Megalithic.SG" "Scotland_Mesolithic_all.SG" "Ireland_Megalithic.SG" )
+
+
+for fr in ${FRPOPS[@]};
+do 
+cd $wrkDir
+for t in ${test[@]}; do 
+  for d in ${Dpop[@]}; do 
+  echo "$outlier $t $fr $d" >> fstats/f4/PREGO/input/list_Dstats_${outlier}_BritainMeso_${fr}_modFrAndAncBritain.txt; 
+  #generating par file 
+  done
+done;
+(
+echo "genotypename:    /sandbox/shares/mages/WGS_PREGO_Finistere_GAZEL/isabel/FR_aDNA_medieval/calling_HOA/mergeHOA/$inputName.geno"
+echo "snpname:         /sandbox/shares/mages/WGS_PREGO_Finistere_GAZEL/isabel/FR_aDNA_medieval/calling_HOA/mergeHOA/$inputName.snp"
+echo "indivname:       /sandbox/shares/mages/WGS_PREGO_Finistere_GAZEL/isabel/FR_aDNA_medieval/calling_HOA/mergeHOA/$inputName.fr25.ind"
+echo "popfilename:     $wrkDir/fstats/f4/PREGO/input/list_Dstats_${outlier}_BritainMeso_${fr}_modFrAndAncBritain.txt"
+) > fstats/f4/PREGO/input/par.Dstats_${outlier}_BritainMeso_${fr}_modFrAndAncBritain.par
+
+cd 
+AdmixTools/bin/qpDstat \
+-p $wrkDir/fstats/f4/PREGO/input/par.Dstats_${outlier}_BritainMeso_${fr}_modFrAndAncBritain.par \
+> $wrkDir/fstats/f4/PREGO/output/par.Dstats_${outlier}_BritainMeso_${fr}_modFrAndAncBritain.log
+done
+```
+
+
+## Compute Dstats in the form of D(Mbuti, modFrench/FRMedieval, Germany_MN_Blatterhohle, Germany_CordedWare)
+
+```{bash eval=FALSE}
+wrkDir="/sandbox/shares/mages/WGS_PREGO_Finistere_GAZEL/isabel/REICH_march2020"
+#cd $wrkDir
+
+#mkdir fstats/f3/PREGO
+#mkdir fstats/f3/PREGO/input
+#mkdir fstats/f3/PREGO/output
+
+inputName="fr_vk_1240kHO_WHG_SP_sixMedieval"
+
+#generating list of comparisons
+outlier="Mbuti"
+
+England_BellBeaker
+#generating list of comparisons
+Bpop=( "cluster2" "cluster1" "cluster3" "BASSE-NORMANDIE.HAUTE-NORMANDIE" "NORD-PAS-DE-CALAIS.PICARDIE" "ALSACE.LORRAINE" "CENTRE" "LIMOUSIN.POITOU-CHARENTES" "FRMedieval" "England_Roman.SG" "England_IA.SG" "Ireland_BA.SG" "English" )
+
+Cpop=( "Germany_MN_Blatterhohle" )
+Dpop=( "Germany_CordedWare" )
+cd $wrkDir
+for fr in ${Bpop[@]};
+do 
+  echo "$outlier $fr $Cpop $Dpop" >> fstats/f4/PREGO/input/list_Dstats_${outlier}_modancFrENG_${Cpop}_${Dpop}.txt; 
+  #generating par file 
+
+done;
+(
+echo "genotypename:    /sandbox/shares/mages/WGS_PREGO_Finistere_GAZEL/isabel/FR_aDNA_medieval/calling_HOA/mergeHOA/$inputName.geno"
+echo "snpname:         /sandbox/shares/mages/WGS_PREGO_Finistere_GAZEL/isabel/FR_aDNA_medieval/calling_HOA/mergeHOA/$inputName.snp"
+echo "indivname:       /sandbox/shares/mages/WGS_PREGO_Finistere_GAZEL/isabel/FR_aDNA_medieval/calling_HOA/mergeHOA/$inputName.fr25.ind"
+echo "popfilename:     $wrkDir/fstats/f4/PREGO/input/list_Dstats_${outlier}_modancFrENG_${Cpop}_${Dpop}.txt"
+) > fstats/f4/PREGO/input/par.Dstats_${outlier}_modancFrENG_${Cpop}_${Dpop}.par
+
+cd 
+AdmixTools/bin/qpDstat \
+-p $wrkDir/fstats/f4/PREGO/input/par.Dstats_${outlier}_modancFrENG_${Cpop}_${Dpop}.par \
+> $wrkDir/fstats/f4/PREGO/output/par.Dstats_${outlier}_modancFrENG_${Cpop}_${Dpop}.log
+done
+```
+
+## Compute Dstats in the form of D(Mbuti, ancient YAM/EF/WHG, cluster2, other modFrench)
+
+```{bash eval=FALSE}
+wrkDir="/sandbox/shares/mages/WGS_PREGO_Finistere_GAZEL/isabel/REICH_march2020"
+#cd $wrkDir
+
+#mkdir fstats/f3/PREGO
+#mkdir fstats/f3/PREGO/input
+#mkdir fstats/f3/PREGO/output
+
+inputName="fr_vk_1240kHO_WHG_SP_sixMedieval"
+
+#generating list of comparisons
+#outlier="Mbuti"
+outlier="Luxembourg_Loschbour_published.DG" #Mbuti, England_BellBeaker
+
+#generating list of comparisons
+FRPOPS=( "cluster1" "cluster3" "BASSE-NORMANDIE.HAUTE-NORMANDIE" "NORD-PAS-DE-CALAIS.PICARDIE" "ALSACE.LORRAINE" "CENTRE" "LIMOUSIN.POITOU-CHARENTES" "FR_EMedieval" "FR_HMedieval" )
+
+Bpop=("Netherlands_BellBeaker") #"England_BellBeaker" #Russia_EBA_Yamnaya_Samara #Germany_CordedWare
+#England_N #Iberia_EN Germany_EN_LBK_published #England_Mesolithic_all.SG #Italy_Mesolithic.SG Luxembourg_Loschbour_published.DG
+
+Cpop=( "cluster2" )
+
+cd $wrkDir
+for Dpop in ${FRPOPS[@]};
+do 
+  echo "$outlier $Bpop $Cpop $Dpop" >> fstats/f4/PREGO/input/list_Dstats_${outlier}_${Bpop}_cluster2_otherModFR.txt; 
+  #generating par file 
+
+done;
+(
+echo "genotypename:    /sandbox/shares/mages/WGS_PREGO_Finistere_GAZEL/isabel/FR_aDNA_medieval/calling_HOA/mergeHOA/$inputName.geno"
+echo "snpname:         /sandbox/shares/mages/WGS_PREGO_Finistere_GAZEL/isabel/FR_aDNA_medieval/calling_HOA/mergeHOA/$inputName.snp"
+echo "indivname:       /sandbox/shares/mages/WGS_PREGO_Finistere_GAZEL/isabel/FR_aDNA_medieval/calling_HOA/mergeHOA/$inputName.fr25.splitFrMed.ind"
+echo "popfilename:     $wrkDir/fstats/f4/PREGO/input/list_Dstats_${outlier}_${Bpop}_cluster2_otherModFR.txt"
+echo "f4mode:   YES"
+echo "printsd:  YES"
+) > fstats/f4/PREGO/input/par.Dstats_${outlier}_${Bpop}_cluster2_otherModFR.par
+
+cd 
+AdmixTools/bin/qpDstat \
+-p $wrkDir/fstats/f4/PREGO/input/par.Dstats_${outlier}_${Bpop}_cluster2_otherModFR.par \
+> $wrkDir/fstats/f4/PREGO/output/par.Dstats_${outlier}_${Bpop}_cluster2_otherModFR.log
+
+```
+
+## Compute Dstats in the form of D(Mbuti, England_Roman.SG, cluster2, other modFrench)
+
+```{bash eval=FALSE}
+wrkDir="/sandbox/shares/mages/WGS_PREGO_Finistere_GAZEL/isabel/REICH_march2020"
+#cd $wrkDir
+
+#mkdir fstats/f3/PREGO
+#mkdir fstats/f3/PREGO/input
+#mkdir fstats/f3/PREGO/output
+
+inputName="fr_vk_1240kHO_WHG_SP_sixMedieval"
+
+#generating list of comparisons
+#outlier="Mbuti"
+outlier="Mbuti" #Mbuti, England_BellBeaker
+
+#generating list of comparisons
+#FRPOPS=( "cluster1" "cluster3" "BASSE-NORMANDIE.HAUTE-NORMANDIE" "NORD-PAS-DE-CALAIS.PICARDIE" "ALSACE.LORRAINE" "CENTRE" "LIMOUSIN.POITOU-CHARENTES" "FRMedieval" )
+
+Bpop=("cluster2")
+
+Cpop=( "England_IA.SG" )
+Dpop=( "England_BellBeaker" )
+
+cd $wrkDir
+echo "$outlier $Bpop $Cpop $Dpop" >> fstats/f4/PREGO/input/list_Dstats_${outlier}_${Bpop}_${Cpop}_${Dpop}.txt; 
+
+(
+echo "genotypename:    /sandbox/shares/mages/WGS_PREGO_Finistere_GAZEL/isabel/FR_aDNA_medieval/calling_HOA/mergeHOA/$inputName.geno"
+echo "snpname:         /sandbox/shares/mages/WGS_PREGO_Finistere_GAZEL/isabel/FR_aDNA_medieval/calling_HOA/mergeHOA/$inputName.snp"
+echo "indivname:       /sandbox/shares/mages/WGS_PREGO_Finistere_GAZEL/isabel/FR_aDNA_medieval/calling_HOA/mergeHOA/$inputName.fr25.ind"
+echo "popfilename:     $wrkDir/fstats/f4/PREGO/input/list_Dstats_${outlier}_${Bpop}_${Cpop}_${Dpop}.txt"
+) > fstats/f4/PREGO/input/par.Dstats_${outlier}_${Bpop}_${Cpop}_${Dpop}.par
+
+cd 
+AdmixTools/bin/qpDstat \
+-p $wrkDir/fstats/f4/PREGO/input/par.Dstats_${outlier}_${Bpop}_${Cpop}_${Dpop}.par \
+> $wrkDir/fstats/f4/PREGO/output/par.Dstats_${outlier}_${Bpop}_${Cpop}_${Dpop}.log
+
+```
+
+```{bash eval=FALSE}
+scp Mesolithic_and_Megalithic_ids_toExtract.txt alves-i@bird2login.univ-nantes.fr:/sandbox/shares/mages/WGS_PREGO_Finistere_GAZEL/isabel/REICH_march2020 
+
+#on BiRD
+cd /sandbox/shares/mages/WGS_PREGO_Finistere_GAZEL/isabel/REICH_march2020/
+cp ORIGINAL/v42.4.1240K_HO.ind ORIGINAL/v42.4.1240K_HO.allIgnore_tmp.ind
+cat ORIGINAL/v42.4.1240K_HO.allIgnore_tmp.ind | awk '{print $1,$2,"Ignore"}' > ORIGINAL/v42.4.1240K_HO.allIgnore_tmp_tmp.ind
+
+cat Mesolithic_and_Megalithic_ids_toExtract.txt | while read tag; do echo "Retrieving $tag"; popTag=`grep $tag$' ' ORIGINAL/v42.4.1240K_HO.ind | awk '{print $3}'`; sed -i "/$tag / s/Ignore/$popTag/g" ORIGINAL/v42.4.1240K_HO.allIgnore_tmp_tmp.ind; echo ""; done
+
+mv ORIGINAL/v42.4.1240K_HO.allIgnore_tmp_tmp.ind ORIGINAL/v42.4.1240K_HO.allIgnore.ind
+rm ORIGINAL/*tmp*
+
+wrkDir="/sandbox/shares/mages/WGS_PREGO_Finistere_GAZEL/isabel/REICH_march2020"
+inFname="v42.4.1240K_HO"
+outFname="Meso_Megalithic_ReichMarch2020"
+
+(
+echo "genotypename:    $wrkDir/ORIGINAL/$inFname.geno"   
+echo "snpname:         $wrkDir/ORIGINAL/$inFname.snp"
+echo "indivname:       $wrkDir/ORIGINAL/$inFname.allIgnore.ind"
+echo "outputformat:    EIGENSTRAT"
+echo "genotypeoutname: $wrkDir/SUBSET_finalPops/$outFname.geno"
+echo "snpoutname:      $wrkDir/SUBSET_finalPops/$outFname.snp"
+echo "indivoutname:    $wrkDir/SUBSET_finalPops/$outFname.ind"
+echo "familynames:     NO"
+) > $wrkDir/convert.1240KHO.MesoMega.par
+
+/sandbox/users/alves-i/EIG-6.1.4/bin/convertf \
+-p $wrkDir/convert.1240KHO.MesoMega.par > $wrkDir/convert.1240KHO.MesoMega.log
+
+mv $wrkDir/SUBSET_finalPops/$outFname.snp $wrkDir/SUBSET_finalPops/$outFname.rs.snp
+cat $wrkDir/SUBSET_finalPops/$outFname.rs.snp | awk '{OFS=" "; print $2":"$4,$2,$3,$4,$5,$6}' > $wrkDir/SUBSET_finalPops/$outFname.snp
+
+#merge dataset generated initially with the one containing only WHG from Marinna's analyses
+dirFullds="/sandbox/shares/mages/WGS_PREGO_Finistere_GAZEL/isabel/FR_aDNA_medieval/calling_HOA/mergeHOA"
+fullDSFile="fr_vk_1240kHO_WHG_SP_sixMedieval"
+
+dirWHG="/sandbox/shares/mages/WGS_PREGO_Finistere_GAZEL/isabel/REICH_march2020/SUBSET_finalPops"
+whgFile="Meso_Megalithic_ReichMarch2020"
+
+(
+echo "geno1:           $dirFullds/$fullDSFile.geno"
+echo "snp1:            $dirFullds/$fullDSFile.snp"
+echo "ind1:            $dirFullds/$fullDSFile.fr25.ind"
+echo "geno2:           $dirWHG/$whgFile.geno"     
+echo "snp2:            $dirWHG/$whgFile.snp"
+echo "ind2:            $dirWHG/$whgFile.ind"
+echo "genooutfilename: $dirFullds/fr_vk_1240kHO_MesoMega.geno"
+echo "snpoutfilename:  $dirFullds/fr_vk_1240kHO_MesoMega.snp"
+echo "indoutfilename:  $dirFullds/fr_vk_1240kHO_MesoMega.fr25.ind"
+echo "outputformat:    EIGENSTRAT"
+echo "docheck: YES"
+echo "strandcheck: YES"
+) > $dirFullds/input.MERGEIT.EIGENSTRAT.MesoMega.par
+
+/sandbox/users/alves-i/EIG-6.1.4/bin/mergeit -p $dirFullds/input.MERGEIT.EIGENSTRAT.MesoMega.par > $dirFullds/input.MERGEIT.EIGENSTRAT.MesoMega.log
+
+```
+
+
+## Compute Dstats(Mbuti, test; England_BellBeaker; England_N)
+
+```{bash eval=FALSE}
+wrkDir="/sandbox/shares/mages/WGS_PREGO_Finistere_GAZEL/isabel/REICH_march2020"
+#cd $wrkDir
+
+#mkdir fstats/f3/PREGO
+#mkdir fstats/f3/PREGO/input
+#mkdir fstats/f3/PREGO/output
+
+inputName="fr_vk_1240kHO_WHG_SP_sixMedieval"
+
+#generating list of comparisons
+#outlier="Mbuti"
+outlier="Mbuti" #Mbuti, England_BellBeaker
+
+#generating list of comparisons
+FRPOPS=( "England_C_EBA" "Scotland_C_EBA" "England_MBA" "Scotland_MBA" "Ireland_BA.SG" "England_LBA" "Scotland_LBA" "England_IA.SG" "England_LIA_ERoman.SG" "England_Roman.SG" "England_Saxon.SG" "FRMedieval" "English" "Scottish" "Orcadian" "cluster2" "cluster1" "cluster3" "BASSE-NORMANDIE.HAUTE-NORMANDIE" "NORD-PAS-DE-CALAIS.PICARDIE" "ALSACE.LORRAINE" "CENTRE" "LIMOUSIN.POITOU-CHARENTES" )
+
+Cpop=("England_BellBeaker") #England_Roman.SG
+
+Dpop=( "Wales_LN" )
+
+cd $wrkDir
+for Bpop in ${FRPOPS[@]};
+do 
+  echo "$outlier $Bpop $Cpop $Dpop" >> fstats/f4/PREGO/input/list_Dstats_${outlier}_test_${Cpop}_${Dpop}.txt; 
+  #generating par file 
+
+done;
+(
+echo "genotypename:    /sandbox/shares/mages/WGS_PREGO_Finistere_GAZEL/isabel/FR_aDNA_medieval/calling_HOA/mergeHOA/$inputName.geno"
+echo "snpname:         /sandbox/shares/mages/WGS_PREGO_Finistere_GAZEL/isabel/FR_aDNA_medieval/calling_HOA/mergeHOA/$inputName.snp"
+echo "indivname:       /sandbox/shares/mages/WGS_PREGO_Finistere_GAZEL/isabel/FR_aDNA_medieval/calling_HOA/mergeHOA/$inputName.fr25.ind"
+echo "popfilename:     $wrkDir/fstats/f4/PREGO/input/list_Dstats_${outlier}_test_${Cpop}_${Dpop}.txt"
+) > fstats/f4/PREGO/input/par.Dstats_${outlier}_test_${Cpop}_${Dpop}.par
+
+cd 
+AdmixTools/bin/qpDstat \
+-p $wrkDir/fstats/f4/PREGO/input/par.Dstats_${outlier}_test_${Cpop}_${Dpop}.par \
+> $wrkDir/fstats/f4/PREGO/output/par.Dstats_${outlier}_test_${Cpop}_${Dpop}.log
+
+```
+
+## Compute Dstats in the form of D(Mbuti, modFR; FR_EMedieval, FR_HMedieval)
+
+```{bash eval=FALSE}
+wrkDir="/sandbox/shares/mages/WGS_PREGO_Finistere_GAZEL/isabel/REICH_march2020"
+#cd $wrkDir
+
+#mkdir fstats/f3/PREGO
+#mkdir fstats/f3/PREGO/input
+#mkdir fstats/f3/PREGO/output
+
+inputName="fr_vk_1240kHO_WHG_SP_sixMedieval"
+
+#generating list of comparisons
+#outlier="Mbuti"
+outlier="Mbuti" #Mbuti, England_BellBeaker
+
+#generating list of comparisons
+FRPOPS=( "cluster2" "cluster1" "cluster3" "BASSE-NORMANDIE.HAUTE-NORMANDIE" "NORD-PAS-DE-CALAIS.PICARDIE" "ALSACE.LORRAINE" "CENTRE" "LIMOUSIN.POITOU-CHARENTES" )
+#"England_C_EBA" "Scotland_C_EBA" "England_MBA" "Scotland_MBA" "Ireland_BA.SG" "England_LBA" "Scotland_LBA" "England_IA.SG" "England_LIA_ERoman.SG" "England_Roman.SG" "England_Saxon.SG" "FRMedieval" "English" "Scottish" "Orcadian"
+
+Cpop=("FR_EMedieval") #England_Roman.SG #Germany_LRoman.SG
+
+Dpop=( "FR_HMedieval" ) #"England_Roman.SG"
+
+cd $wrkDir
+for Bpop in ${FRPOPS[@]};
+do 
+  echo "$outlier $Bpop $Cpop $Dpop" >> fstats/f4/PREGO/input/list_Dstats_${outlier}_ancFR_${Cpop}_${Dpop}.txt; 
+  #generating par file 
+
+done;
+(
+echo "genotypename:    /sandbox/shares/mages/WGS_PREGO_Finistere_GAZEL/isabel/FR_aDNA_medieval/calling_HOA/mergeHOA/$inputName.geno"
+echo "snpname:         /sandbox/shares/mages/WGS_PREGO_Finistere_GAZEL/isabel/FR_aDNA_medieval/calling_HOA/mergeHOA/$inputName.snp"
+echo "indivname:       /sandbox/shares/mages/WGS_PREGO_Finistere_GAZEL/isabel/FR_aDNA_medieval/calling_HOA/mergeHOA/$inputName.fr25.splitFrMed.ind"
+echo "popfilename:     $wrkDir/fstats/f4/PREGO/input/list_Dstats_${outlier}_ancFR_${Cpop}_${Dpop}.txt"
+) > fstats/f4/PREGO/input/par.Dstats_${outlier}_ancFR_${Cpop}_${Dpop}.par
+
+cd 
+AdmixTools/bin/qpDstat \
+-p $wrkDir/fstats/f4/PREGO/input/par.Dstats_${outlier}_ancFR_${Cpop}_${Dpop}.par \
+> $wrkDir/fstats/f4/PREGO/output/par.Dstats_${outlier}_ancFR_${Cpop}_${Dpop}.log
+
+```
+
+## Compute Dstats in the form of D(Mbuti, Russia_EBA_Yamnaya_Samara; Netherland_BellBeaker; test)
+
+```{bash eval=FALSE}
+wrkDir="/LAB-DATA/BiRD/shares/ITX/mages/WGS_PREGO_Finistere_GAZEL/isabel/REICH_march2020" #new path
+cd $wrkDir
+inputName="fr_vk_1240kHO_WHG_SP_sixMedieval"
+#fr_vk_1240kHO_WHG_SP_sixMedieval.fr25.splitFrMed.ind  
+#generating list of comparisons
+#outlier="Mbuti"
+outlier="Mbuti" #Mbuti, England_BellBeaker
+  
+#generating list of comparisons
+FRPOPS=( "Ireland_MN.SG" "Scotland_N" "Wales_N" "Wales_LN" "France_MN" "Germany_LN_BenzigerodeHeimburg" "Germany_MN_Blatterhohle" "Denmark_LN.SG" "Wales_C.SG" "Iberia_C" "Italy_C.SG" "Italy_North_Remedello_C.SG" "Germany_CordedWare" "Czech_CordedWare" "Hungary_LC_EBA_Baden_Yamnaya" "Czech_BellBeaker" "France_BellBeaker" "France_BellBeaker_lowSteppe" "Germany_BellBeaker" "Germany_Lech_BellBeaker" "Hungary_EBA_BellBeaker" "Iberia_BellBeaker" "Italy_North_BellBeaker" "England_BellBeaker" "Poland_BellBeaker" "Scotland_BellBeaker" "Switzerland_BellBeaker" "Iberia_C_BA"  "Iberia_EBA" "Sweden_BAC" "England_C_EBA" "Scotland_C_EBA" "Germany_EBA_Unetice" "Germany_Lech_EBA" "Czech_EBA" "Czech_EBA_Unetice" "Italy_C_BA.SG" "Italy_North_Remedello_EBA.SG" "Denmark_BA.SG" "Iberia_BA" "Germany_BA.SG" "Ireland_BA.SG" "Czech_BA" "England_MBA" "Iberia_MBA.SG" "Scotland_MBA" "Germany_Lech_MBA" "Hungary_MBA_Vatya.SG" "England_LBA" "Scotland_LBA" "Sweden_LNBA" "Germany_LBA_Halberstadt_published" "Denmark_LBA.SG" "Hungary_LBA_Kyjatice" "Iberia_LBA_Cogotas" "England_IA.SG" "Iberia_IA" "England_LIA.SG" "Italy_IA_Republic.SG" "Iberia_Celtiberian" "England_LIA_ERoman.SG" "Italy_Imperial.SG" "Iberia_Roman" "England_Roman.SG" "Germany_LRoman.SG" "Italy_North_EarlyMedieval_Langobards" "Germany_EMedieval.SG" "FR_EMedieval" "England_Saxon.SG" "Iberia_Medieval_published" "Vikings" "Iceland_Pre_Christian.SG" "Italy_Medieval_EarlyModern.SG" "Italy_Medieval_EarlyModern_oCentralEuropean.SG" "FR_HMedieval" "Iceland_Early_Christian.SG" "cluster2" "cluster1" "cluster3" "BASSE-NORMANDIE.HAUTE-NORMANDIE" "NORD-PAS-DE-CALAIS.PICARDIE" "ALSACE.LORRAINE" "CENTRE" "LIMOUSIN.POITOU-CHARENTES" "Norwegian" "Icelandic" "Scottish" "Orcadian" "English" "Basque" "Spanish" "Spanish_North" "Italian_North" "Italian_South" "Sardinian" "Greek" "Hungarian" )  
+  
+Cpop=("Iberia_EN") #"England_BellBeaker" #Russia_EBA_Yamnaya_Samara #Germany_CordedWare
+
+Dpop=( "Germany_EN_LBK_published" ) #England_N #Iberia_EN Germany_EN_LBK_published #England_Mesolithic_all.SG #Italy_Mesolithic.SG Luxembourg_Loschbour_published.DG
+
+cd $wrkDir
+for Bpop in ${FRPOPS[@]};
+do 
+  echo "$outlier $Bpop $Cpop $Dpop" >> fstats/f4/PREGO/input/list_Dstats_${outlier}_modAncTest_${Cpop}_${Dpop}.txt; 
+  #generating par file 
+
+done;
+(
+echo "genotypename:    /LAB-DATA/BiRD/shares/ITX/mages/WGS_PREGO_Finistere_GAZEL/isabel/FR_aDNA_medieval/calling_HOA/mergeHOA/$inputName.geno"
+echo "snpname:         /LAB-DATA/BiRD/shares/ITX/mages/WGS_PREGO_Finistere_GAZEL/isabel/FR_aDNA_medieval/calling_HOA/mergeHOA/$inputName.snp"
+echo "indivname:       /LAB-DATA/BiRD/shares/ITX/mages/WGS_PREGO_Finistere_GAZEL/isabel/FR_aDNA_medieval/calling_HOA/mergeHOA/$inputName.fr25.splitFrMed.ind"
+echo "popfilename:     $wrkDir/fstats/f4/PREGO/input/list_Dstats_${outlier}_modAncTest_${Cpop}_${Dpop}.txt"
+echo "printsd:         YES"
+echo "f4mode:   YES"
+) > fstats/f4/PREGO/input/par.Dstats_${outlier}_modAncTest_${Cpop}_${Dpop}.par
+
+cd 
+/LAB-DATA/BiRD/users/alves-i/AdmixTools-master/bin/qpDstat \
+-p $wrkDir/fstats/f4/PREGO/input/par.Dstats_${outlier}_modAncTest_${Cpop}_${Dpop}.par \
+> $wrkDir/fstats/f4/PREGO/output/par.Dstats_${outlier}_modAncTest_${Cpop}_${Dpop}.log
+
+```
+```{r echo=TRUE}
+#####################################
+##
+## Plot lolipop plots with f4 statistics
+##
+####################################  
+workDir <- "/home/ialves/Dropbox/instDuThorax/REICH_SUPERDATASET_aDNA/PREGO/f4/output"
+setwd(workDir)
+
+fileNames <- list.files(workDir, pattern="*_Netherlands_BellBeaker_modAncTest_tmp.log", full.names=TRUE)
+
+frPOPs <- c("cluster2", "cluster1", "cluster3", "BASSE-NORMANDIE.HAUTE-NORMANDIE", "NORD-PAS-DE-CALAIS.PICARDIE", "ALSACE.LORRAINE","CENTRE","LIMOUSIN.POITOU-CHARENTES")
+publishLabels <- c("WBR",  "EBP", "SLO", "NOR", "HAU", "GRA", "CEN", "NOU")
+
+modEur <- c("Icelandic","Norwegian","Orcadian", "Scottish", "English", "Hungarian", "Spanish_North", "Spanish", "Italian_North", "Italian_South")
+
+
+remaingOrder <- c("Icelandic","Norwegian","Orcadian", "Scottish", "English", "Hungarian", "Basque", "Spanish_North", "Spanish", "Italian_North", "Italian_South", "Sardinian", "Greek")
+remaingOrder_toPublish <- c("Icelandic", "Norwegian","Orcadian", "Scottish", "English", "Hungarian", "Basque", "SpaN", "Spanish", "ItaN", "ItaS", "Sardinian", "Greek")
+
+allPops <- c(frPOPs, remaingOrder)
+publishFullPopNames <- c(publishLabels, remaingOrder_toPublish)
+publishPopLabels <- substr(publishLabelsToChange,start=1, stop=4)
+
+  
+  for(file in fileNames) {
+    
+    #file <- fileNames[1]
+    open.f4 <- read.table(file, header = FALSE)
+
+    outgroupLabel <- as.character(unique(open.f4$V1))
+    popC <- as.character(unique(open.f4$V3)) # change here to the f4(a,b; c, d)
+    if(length(as.character(unique(open.f4$V2))) > 1) {
+      popB <- "test"
+    } else {
+      popB <- as.character(unique(open.f4$V2))
+    }
+    popD <- as.character(unique(open.f4$V4))
+    
+    newColC <- c()
+    newColD <- c()
+    if(length(intersect(popC, allPops)) > 0) {
+      if (length(intersect(popC, allPops)) == 1) {
+        
+        newColC <- as.character(open.f4$V3[which(open.f4$V3 == intersect(popC, allPops))])
+        newColC[which(newColC == intersect(popC, allPops))] <- publishFullPopNames[which(allPops == intersect(popC, allPops))]
+        
+      } else if (length(intersect(popC, allPops)) > 1) {
+
+        newColC <- as.character(open.f4$V3[match(open.f4$V3 == intersect(popC, allPops))])
+        newColC[match(newColC == intersect(popC, allPops))] <- publishFullPopNames[match(allPops == intersect(popC,allPops))]
+      }
+    } 
+    if(length(intersect(popD, allPops)) > 0) {
+      if (length(intersect(popD, allPops)) == 1) {
+        newColD <- as.character(open.f4$V4[which(open.f4$V4 == intersect(popD, allPops))])
+        newColD[which(newColD == intersect(popD, allPops))] <- publishFullPopNames[which(allPops == intersect(popD, allPops))]
+
+      } else if (length(intersect(popD, allPops)) > 1) {
+        #newColD <- as.character(open.f4$V4[match(open.f4$V4,intersect(popD, allPops))])
+        newColD <- as.character(open.f4$V4)
+        newColD[match(allPops, newColD)] <- publishFullPopNames[match(newColD[match(allPops, newColD)], allPops)]
+        #newColD <- publishFullPopNames[match(intersect(newColD,allPops), allPops)]
+      }
+    }
+    
+    if(length(newColC) > 0 & length(newColD) > 0) {
+      new_df <- as.data.frame(cbind(open.f4[,1], open.f4[,2], newColC, newColD, open.f4[,5:10]))
+    } else if (length(newColC) == 0 & length(newColD) > 0) {
+      new_df <- as.data.frame(cbind(open.f4[,1], open.f4[,2], open.f4[,3], newColD, open.f4[,5:10]))
+    } else if (length(newColC) > 0 & length(newColD) == 0) {
+      new_df <- as.data.frame(cbind(open.f4[,1], open.f4[,2], newColC, open.f4[,4], open.f4[,5:10]))
+    }
+
+    names(new_df) <- paste0("V", 1:ncol(open.f4))
+    rm(open.f4)
+    open.f4 <- new_df
+    rm(new_df)
+    sd.f4 <- rep(NA,nrow(open.f4)+2)
+    #sd.f4 <- open.f4$V5/open.f4$V6
+    sd.f4 <- open.f4$V6
+  
+    z.score <- rep(NA,nrow(open.f4)+2)
+    z.score <- open.f4$V7
+    f4Stats <- rep(NA,nrow(open.f4)+2)
+    f4Stats <- open.f4$V5
+    fontype <- rep(1, nrow(open.f4))
+  
+    #fontype[c(5,10)] <- NA
+    fontype[which(abs(open.f4$V7) > 3)] <- 4 #Z-score larger than 3
+    colorsGROUP <- "grey"
+    popLabels <- as.character(open.f4$V4)
+    #popLabels <- substr(as.character(open.f4$V4),start=1, stop=4)
+    colLabels <- rep("black", length(popLabels))
+    colLabels[match(intersect(publishLabels[1:8], popLabels), popLabels)] <- "royalblue"
+    
+    if(is.element(popC, allPops)) {
+      popC <- publishFullPopNames[which(allPops == popC)]
+    }
+
+    #plot png
+    png(file=paste0(workDir, "/", outgroupLabel, "_", popB, "_", popC, "_", "X.png"),  height = 10, width = 10,
+    units = 'in', res = 300)
+    par(mfrow=c(1,1),mar=c(4,2,2,15))
+    plot(x=f4Stats, y=nrow(open.f4):1,
+         xlim=range(min(f4Stats-sd.f4, na.rm = T), max(f4Stats+sd.f4, na.rm = T)),
+         pch=19, ylab="", main=paste0("f4(", outgroupLabel, ", ", popB, "; " , popC, ",",  " X)"), yaxt='n', col=colorsGROUP,
+         xlab="f4", cex.lab=2, axes = T, type = 'n', cex.axis=1.25) # xlim=c(-0.006,0.006)
+    
+    # hack: we draw arrows but with very special "arrowheads"
+    arrows(x0=f4Stats-sd.f4, y0=nrow(open.f4):1, 
+           x1=f4Stats+sd.f4, y1=nrow(open.f4):1,
+           length=0.05, angle=90, code=0, col = "grey48", lwd=2)
+    points(x=f4Stats, y=nrow(open.f4):1, col=colorsGROUP,
+           pch=19, cex=2)
+    abline(v=0, lty=2, lwd=2, col="grey75")
+    #abline(h=c(5,10), lty=1, lwd=1, col="black")
+    #axis(2, at=(nrow(open.f4)+2):1, labels = FALSE, las=1, cex.axis=0.75)
+    #mtext(text=orderPopsAll, side = 2, at = length(orderPopsAll):1, col=c(rep("brown4", 7), rep("grey75", length(orderPopsAll)-7)), las = 2, adj=1, line = 1)
+    axis(4, at=nrow(open.f4):1, labels = FALSE, las=1, cex.axis=0.75)
+    mtext(text=popLabels, at=nrow(open.f4):1, side = 4,
+          las = 2, adj = 0, line = 1, col=colLabels, font=fontype, cex=0.75)
+    dev.off()
+  }
+
+
+###########################################
+########################################
+####################################
+################################
+###-------------------
+```
+```{r echo=TRUE}
+#####################################
+##
+## Plot barplot working models - two-way models 
+##
+####################################
+library(randomcoloR)
+workDir <- "/home/ialves/Dropbox/instDuThorax/REICH_SUPERDATASET_aDNA/PREGO/qpAdm/twoWay"
+setwd(workDir)
+
+fileNames <- "workingModels_summary.txt"
+workingModelOpen <- read.table(paste0(workDir, "/", fileNames), header = T, sep = "\t")
+
+sourceTwo <- as.character(unique(workingModelOpen$Source.2))
+colSources <- distinctColorPalette(length(sourceTwo))
+
+frenchAcronyms <- c("WBR", "EBP", "SLO", "NOR", "HAU", "GRA", "CEN", "NOU")
+png(paste0(workDir, "/log10_modelResults.pdf"), width = 1200, height = 1200)
+png(paste0(workDir, "/log10_modelResults.png"), width = 24, height = 16, units = 'in', res = 300)
+par(mfrow=c(5,4), mgp=c(2,0.5,0), mar=c(2,4,2,4))
+for(sour in 1:length(sourceTwo)) {
+  #sour <- 1
+  p.values <- rep(0,length(frenchAcronyms))
+  propSourTwo <- rep(0,length(frenchAcronyms))
+  COUNT <- 1
+  for(target in frenchAcronyms) {
+    
+    if(length(workingModelOpen$p.value[which(workingModelOpen$Target == target & workingModelOpen$Source.2 == sourceTwo[sour])]) > 0){
+      p.values[COUNT] <- workingModelOpen$p.value[which(workingModelOpen$Target == target & workingModelOpen$Source.2 == sourceTwo[sour])] 
+      propSourTwo[COUNT] <- unlist(strsplit(as.character(workingModelOpen$Prop.2..std.error.[which(workingModelOpen$Target == target & workingModelOpen$Source.2 == sourceTwo[sour])]), split = "\\s+"))[[1]]
+    }
+    COUNT <- COUNT+1  
+  }
+  propSourTwo[which(propSourTwo == 0)] <- NA
+  propSourTwo <- as.numeric(propSourTwo)
+  names(propSourTwo) <- frenchAcronyms
+  propSourTwoWay <- cbind(propSourTwo,1-propSourTwo)
+  #barplot(t(propSourTwoWay))
+  #  plot(p.values, type = "b", xaxt="n", ylab="P-value", pch=19, xlab="", ylim=c(0,1))
+  #axis(1, at = 1:length(frenchAcronyms), labels = frenchAcronyms)
+  #par(mar=c(4,4,1,4))
+  plot("", type = "b", xaxt="n", ylab="Admixture proportions", pch=19, xlab="", ylim=c(0,1), xlim=c(0,8), bty="n", main=sourceTwo[sour], cex.axis=1.5, cex.lab=1.75, cex.main=2)
+  axis(1, at = seq(0.5, length(frenchAcronyms)-0.5, by = 1), labels = frenchAcronyms, cex.axis=1.6)
+  axis(4, at = seq(0, 1, by = 0.2), col = "coral4", col.ticks = "coral4", col.axis="coral4", cex.axis=1.5)
+  mtext("P-value", side = 4, col = "coral4", line = 2.5, cex=1.5)
+  barplot(t(propSourTwoWay), add = T, axisnames = F, width = 0.8, axes = F, col = c(colSources[sour], "grey75"), border = NA) #, width = rep(0.8,6)
+  lines(p.values, x=seq(0.5, length(frenchAcronyms)-0.5, by = 1), type = "b", pch=19, col="coral4")
+  abline(h=0, lty=2, lwd=2, col="grey45")
+  
+}
+dev.off()
+
+```
+
+## Adding new samples to the merged dataset: Iberia_IA, Iberia_Visigoth_Girona, Iberia_Visigoth_Barcelona, Chimp and France_Ranchot88_published
+
+Iberian samples will allow us to test a wider range of Iberians that could be close to NOU. The Chimp is being added to use as an outgroup and France_Ranchot88 is being added to use as a replacement of Loschbour samples representing Mesolithic western Europeans. From all these samples only those containing more than 50000 genotyped SNPs were extracted. 
+
+```{bash eval=FALSE}
+
+grep Iberia_Visigoth_Granada$'\t' v42.4.1240K_HO.anno | awk 'BEGIN { FS = "\t" };{if($15 > 50000){OFS="\t"; print $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19}}' | awk '{print $2}' >> Iberia_Visigoth_Granada_ids_to_extract.txt
+
+grep Iberia_Visigoth_Girona$'\t' v42.4.1240K_HO.anno | awk 'BEGIN { FS = "\t" };{if($15 > 50000){OFS="\t"; print $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19}}' | awk '{print $2}' >> Iberia_Visigoth_Girona_ids_to_extract.txt
+
+grep Iberia_Visigoth_Barcelona$'\t' v42.4.1240K_HO.anno | awk 'BEGIN { FS = "\t" };{if($15 > 50000){OFS="\t"; print $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19}}' | awk '{print $2}' >> Iberia_Visigoth_Barcelona_ids_to_extract.txt
+
+grep Iberia_Iberian$'\t' v42.4.1240K_HO.anno | awk 'BEGIN { FS = "\t" };{if($15 > 50000){OFS="\t"; print $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19}}' | awk '{print $2}' >> Iberia_Iberian_ids_to_extract.txt
+
+grep Iberia_Carolingian$'\t' v42.4.1240K_HO.anno | awk 'BEGIN { FS = "\t" };{if($15 > 50000){OFS="\t"; print $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19}}' | awk '{print $2}' >> Iberia_Carolingian_ids_to_extract.txt
+
+grep Chimp_HO$'\t' v42.4.1240K_HO.anno | awk 'BEGIN { FS = "\t" };{if($15 > 50000){OFS="\t"; print $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19}}' | awk '{print $2}' > chimp_ids_to_extract.txt
+
+grep France_Ranchot88 v42.4.1240K_HO.anno | awk 'BEGIN { FS = "\t" };{if($15 > 50000){OFS="\t"; print $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19}}' | awk '{print $2}' > France_Ranchot88_ids_to_extract.txt
+
+cat chimp_ids_to_extract.txt France_Ranchot88_ids_to_extract.txt Iberia_Visigoth_Granada_ids_to_extract.txt Iberia_Visigoth_Barcelona_ids_to_extract.txt Iberia_Visigoth_Girona_ids_to_extract.txt Iberia_Iberian_ids_to_extract.txt Iberia_Carolingian_ids_to_extract.txt >> ids_to_extract_20102020.txt
+
+scp ids_to_extract_20102020.txt alves-i@bird2login.univ-nantes.fr:/sandbox/shares/mages/WGS_PREGO_Finistere_GAZEL/isabel/REICH_march2020 
+
+#on BiRD
+cd /sandbox/shares/mages/WGS_PREGO_Finistere_GAZEL/isabel/REICH_march2020/
+cp ORIGINAL/v42.4.1240K_HO.ind ORIGINAL/v42.4.1240K_HO.allIgnore_tmp.ind
+cat ORIGINAL/v42.4.1240K_HO.allIgnore_tmp.ind | awk '{print $1,$2,"Ignore"}' > ORIGINAL/v42.4.1240K_HO.allIgnore_tmp_tmp.ind
+
+cat ids_to_extract_20102020.txt | while read tag; do echo "Retrieving $tag"; popTag=`grep $tag$' ' ORIGINAL/v42.4.1240K_HO.ind | awk '{print $3}'`; sed -i "/$tag / s/Ignore/$popTag/g" ORIGINAL/v42.4.1240K_HO.allIgnore_tmp_tmp.ind; echo ""; done
+
+mv ORIGINAL/v42.4.1240K_HO.allIgnore_tmp_tmp.ind ORIGINAL/v42.4.1240K_HO.allIgnore.ind
+rm ORIGINAL/*tmp*
+
+wrkDir="/sandbox/shares/mages/WGS_PREGO_Finistere_GAZEL/isabel/REICH_march2020"
+inFname="v42.4.1240K_HO"
+outFname="aIberian_aFrench"
+
+(
+echo "genotypename:    $wrkDir/ORIGINAL/$inFname.geno"   
+echo "snpname:         $wrkDir/ORIGINAL/$inFname.snp"
+echo "indivname:       $wrkDir/ORIGINAL/$inFname.allIgnore.ind"
+echo "outputformat:    EIGENSTRAT"
+echo "genotypeoutname: $wrkDir/SUBSET_finalPops/$outFname.geno"
+echo "snpoutname:      $wrkDir/SUBSET_finalPops/$outFname.snp"
+echo "indivoutname:    $wrkDir/SUBSET_finalPops/$outFname.ind"
+echo "familynames:     NO"
+) > $wrkDir/convert.1240KHO.$outFname.par
+
+/sandbox/users/alves-i/EIG-6.1.4/bin/convertf \
+-p $wrkDir/convert.1240KHO.$outFname.par > $wrkDir/convert.1240KHO.$outFname.log
+
+mv $wrkDir/SUBSET_finalPops/$outFname.snp $wrkDir/SUBSET_finalPops/$outFname.rs.snp
+cat $wrkDir/SUBSET_finalPops/$outFname.rs.snp | awk '{OFS=" "; print $2":"$4,$2,$3,$4,$5,$6}' > $wrkDir/SUBSET_finalPops/$outFname.snp
+
+#merge dataset generated initially with the one containing only WHG from Marinna's analyses
+dirFullds="/sandbox/shares/mages/WGS_PREGO_Finistere_GAZEL/isabel/FR_aDNA_medieval/calling_HOA/mergeHOA"
+fullDSFile="fr_vk_1240kHO_WHG_SP_sixMedieval"
+
+dirWHG="/sandbox/shares/mages/WGS_PREGO_Finistere_GAZEL/isabel/REICH_march2020/SUBSET_finalPops"
+whgFile="aIberian_aFrench"
+
+(
+echo "geno1:           $dirFullds/$fullDSFile.geno"
+echo "snp1:            $dirFullds/$fullDSFile.snp"
+echo "ind1:            $dirFullds/$fullDSFile.fr25.ind"
+echo "geno2:           $dirWHG/$whgFile.geno"     
+echo "snp2:            $dirWHG/$whgFile.snp"
+echo "ind2:            $dirWHG/$whgFile.ind"
+echo "genooutfilename: $dirFullds/fr_vk_1240kHO_largest.geno"
+echo "snpoutfilename:  $dirFullds/fr_vk_1240kHO_largest.snp"
+echo "indoutfilename:  $dirFullds/fr_vk_1240kHO_largest.fr25.ind"
+echo "outputformat:    EIGENSTRAT"
+echo "docheck: YES"
+echo "strandcheck: YES"
+) > $dirFullds/input.MERGEIT.EIGENSTRAT.$outFname.par
+
+/sandbox/users/alves-i/EIG-6.1.4/bin/mergeit -p $dirFullds/input.MERGEIT.EIGENSTRAT.$outFname.par > $dirFullds/input.MERGEIT.EIGENSTRAT.$outFname.log
+```
+
+### qpAdm - individual three-way models Medieval French
+
+```{bash eval=FALSE}
+
+wrkDir="/sandbox/shares/mages/WGS_PREGO_Finistere_GAZEL/isabel/REICH_march2020/fstats/qpAdm/aDNAMedieval"
+cd $wrkDir
+dataDir="/sandbox/shares/mages/WGS_PREGO_Finistere_GAZEL/isabel/FR_aDNA_medieval/calling_HOA/mergeHOA"
+
+if [ ! -d threeWay/ ]; then
+mkdir threeWay/
+fi
+
+cd threeWay/
+
+inputName="fr_vk_1240kHO_WHG_SP_sixMedieval"
+rightPops="/sandbox/shares/mages/WGS_PREGO_Finistere_GAZEL/isabel/REICH_march2020/fstats/qpAdm/onePop/rightPops/right_pops.txt"
+sourcePop=( "SP" "EF" "HG" )
+
+FRPOPS=( "FRMed001" "FRMed004" "FRMed008" "FRMedOutlier" "FRMed016" "FRMed017" )
+
+
+for fr in ${FRPOPS[@]}; do
+cd ${wrkDir}/threeWay/
+mkdir $fr/
+mkdir $fr/output
+echo $fr > $fr/threeWay.sources.reference.pop
+
+for s in ${sourcePop[@]}; do
+echo $s >> $fr/threeWay.sources.reference.pop
+done
+#aDNA medieval
+(
+echo "genotypename:    $dataDir/$inputName.geno"
+echo "snpname:         $dataDir/$inputName.snp"
+echo "indivname:       $dataDir/$inputName.fr25.threeWay.indFrMed.ind"
+echo "popleft:         $wrkDir/threeWay/$fr/threeWay.sources.reference.pop"
+echo "popright:        $rightPops"
+echo "details: YES"
+) > $fr/par.qpAdm.$fr.threeWay.par
+
+cd
+echo "/sandbox/users/alves-i/AdmixTools/bin/qpAdm -p $wrkDir/threeWay/$fr/par.qpAdm.$fr.threeWay.par > $wrkDir/threeWay/$fr/output/par.qpAdm.$fr.threeWay.log" > $fr.threeWay.bash
+chmod +x $fr.threeWay.bash
+qsub -S /bin/bash -cwd ./$fr.threeWay.bash
+done
+
+#collect results 
+cd /sandbox/shares/mages/WGS_PREGO_Finistere_GAZEL/isabel/REICH_march2020/fstats/qpAdm/aDNAMedieval/threeWay
+for folder in FRMed*/; 
+do 
+dir=${folder%/}; 
+#echo $dir;
+SPprop=`grep "best coefficients:" $dir/output/par* | sed 's/ \+/ /g' | awk '{print $3}'`; 
+EFprop=`grep "best coefficients:" $dir/output/par* | sed 's/ \+/ /g' | awk '{print $4}'`; 
+HGprop=`grep "best coefficients:" $dir/output/par* | sed 's/ \+/ /g' | awk '{print $5}'`;
+SPstdE=`grep "std. errors:" $dir/output/par* | sed 's/ \+/ /g' | awk '{print $3}'`; 
+EFstdE=`grep "std. errors:" $dir/output/par* | sed 's/ \+/ /g' | awk '{print $4}'`; 
+HGstdE=`grep "std. errors:" $dir/output/par* | sed 's/ \+/ /g' | awk '{print $5}'`;
+modelStats=`grep f4rank: $dir/output/par*  | head -1 | sed 's/ \+/ /g' | awk '{OFS="\t"; print $4,$6,$8}'` #dof chisq pvalue
+echo -e "$dir\t$modelStats\t$SPprop (${SPstdE})\t$EFprop (${EFstdE})\t$HGprop (${HGstdE})" >> FRMedieval_qpAdm_threeWay_individual_stats.txt;
+done
+
+#locally
+cd /sandbox/shares/mages/WGS_PREGO_Finistere_GAZEL/isabel/REICH_march2020/fstats/qpAdm/aDNAMedieval/threeWay/
+FRPOPS=( "FRMed001" "FRMed004" "FRMed008" "FRMedOutlier" "FRMed016" "FRMed017" )
+echo SP$'\t'EF$'\t'WHG > qpAdmProp.txt
+echo SP$'\t'EF$'\t'WHG > qpAdmstdErrors.txt
+for dir in ${FRPOPS[@]}; do 
+echo $dir/;
+paste -d$'\t' <(echo $dir) <(grep "coefficients" $dir/output/par.qpAdm.$dir.threeWay.log | awk '{OFS="\t"; print $3,$4,$5}') >> qpAdmProp.txt
+paste -d$'\t' <(echo $dir) <(grep "std." $dir/output/par.qpAdm.$dir.threeWay.log | awk '{OFS="\t"; print $3,$4,$5}') >> qpAdmstdErrors.txt
+done
+
+
+
+```
+
+## Plot qpAdm proportion for modern and Medieval French samples. 
+
+```{r echo=TRUE}
+library(RColorBrewer)
+wrkDir="/home/ialves/Dropbox/instDuThorax/aDNA_medieval/pseudoHap_HOA_calling/fstats/threeWay"
+setwd(wrkDir)
+# I removed the FrMedOutlier as the prop were negative ie the three way model does not fit. 
+
+openProp <- read.table("qpAdmProp.txt", skip = 1)
+colnames(openProp) <- c("Population", "SP", "EF", "WHG")
+openSdtError <- read.table("qpAdmstdErrors.txt",skip=1)
+colnames(openSdtError) <- c("Population", "SP", "EF", "WHG")
+
+publishOrder <- c("FRMed001", "FRMed004", "FRMed016", "FRMed017", "FRMed008")
+publishLabels <- c("fra001", "fra004", "fra016", "fra017", "fra008")
+
+png(file=paste0(wrkDir, "/three-way_admixtureProp_modern_and_Medieval_FR", Sys.Date(),".png"), height = 3, width = 4, units ='in', res = 300) #height = 620, width = 960, units = "in", res = 300
+par(mar=c(4,5,1,1))
+barplot(t(data.frame(openProp[match(publishOrder,openProp$Population),2:4])), legend.text=F, col=c( "mediumseagreen", "coral2", "lightslateblue") , xlim=c(0,1) , xlab="Proportion of ancestry", names.arg = publishLabels, horiz = T, space=0, yaxt="n", cex.axis = 1.25, cex.lab = 1.25) 
+axis(2, at = seq(0.5,4.5,by = 1), labels = publishLabels, las=2, cex.axis=1.25)
+par(xpd=TRUE)
+#legend(y=4.5, x=1.03, legend=colnames(openProp)[-1], fill =  c( "mediumseagreen", "coral2", "lightslateblue"), bty = 'o')
+dev.off()
+
+```
+## Produce sample and timescale for paper
+
+
+```{r echo=TRUE}
+install.packages("extrafont")
+library(extrafont)
+library(stringr)
+loadfonts()
+fonts()
+
+pops <- c("Iberia_IA", "Iberia_Celtiberian", "Iberia_Iberian", "Iberia_Medieval_published", "Iberia_Carolingian", "Iberia_Visigoth_Barcelona", "Iberia_Visigoth_Girona", "Iberia_Visigoth_Granada", "Italy_Medieval_EarlyModern_oCentralEuropean", "Italy_Medieval_EarlyModern", "Italy_North_EarlyMedieval_Langobards", "England_IA", "England_Roman", "England_Saxon",  "France_sLoire_4-6cCE", "France_sLoire_7-8cCE",  "France_nLoire_10-11cCE", "Germany_EMedieval",  "Germany_LRoman","Scandinavia_Vikings", "Iceland_Early_Christian", "Iceland_Pre_Christian")
+
+dataTag <- c("BCE", "BCE", "BCE", "CE", "CE", "CE", "CE", "CE", "CE", "CE", "CE", "BCE", "CE", "CE", "CE", "CE", "CE", "CE", "CE", "CE", "CE", "CE")
+lowerDate <- c(800, 400, 600, 680,785,500,500,330, 1000, 700, 580, 240, 50, 300, 340, 600, 940, 250, 275, 700, 1050,850)
+upperDate <- c(400, 220, 200, 990,810,700,700,725, 1490, 1700, 630, 170, 350, 910, 545, 700, 1025, 650, 325, 1100, 1750, 1050)
+sampleSize <- c(6,3,5,4,5,5,4,9,11,17,18,1,6,8,2,2,1,35,1,25,3,24)
+
+#removing Iberia_IA, Germany_LRoman and England_IA - keeping only samples with > 1 ind
+pops <- c("Iberia_Celtiberian", "Iberia_Iberian", "Iberia_Medieval_published", "Iberia_Carolingian", "Iberia_Visigoth_Barcelona", "Iberia_Visigoth_Girona", "Iberia_Visigoth_Granada", "Italy_Medieval_EarlyModern_oCentralEuropean", "Italy_Medieval_EarlyModern", "Italy_North_EarlyMedieval_Langobards", "England_Roman", "England_Saxon",  "France_sLoire_4-6cCE", "France_sLoire_7-8cCE",  "France_nLoire_10-11cCE", "Germany_EMedieval",  "Scandinavia_Vikings", "Iceland_Early_Christian", "Iceland_Pre_Christian")
+
+dataTag <- c("BCE", "BCE", "CE", "CE", "CE", "CE", "CE", "CE", "CE", "CE", "CE", "CE", "CE", "CE", "CE", "CE", "CE", "CE", "CE")
+lowerDate <- c(400, 600, 680,785,500,500,330, 1000, 700, 580, 50, 300, 340, 600, 940, 250, 700, 1050,850)
+upperDate <- c(220, 200, 990,810,700,700,725, 1490, 1700, 630, 350, 910, 545, 700, 1025, 650, 1100, 1750, 1050)
+sampleSize <- c(3,5,4,5,5,4,9,11,17,18,6,8,2,2,1,35,25,3,24)
+
+
+
+countryOrigin <- as.character(sapply(pops, function(k) { unlist(strsplit(k, split = "_"))[1]}))
+countryPointCode <- c(2,4,7,8,11,12,18)
+names(countryPointCode) <- unique(countryOrigin)
+
+lowDateNegPos <- lowerDate
+lowDateNegPos[which(dataTag == "BCE")] <- -c(lowDateNegPos[which(dataTag == "BCE")] )
+#orderSamples <- order(lowDateNegPos, decreasing = F) #ordered
+orderSamples <- 1:length(lowDateNegPos)
+
+dataTag[orderSamples]
+
+png(file = paste0("/home/ialves/Dropbox/instDuThorax/REICH_SUPERDATASET_aDNA/SAMPLES", "/aDNA_samples_oneWayModels_3Nov.png"),
+    units = 'in', height = 5, width = 10, family = "FreeSans", res=600)
+par(mar=c(4,1,1,12), xpd=TRUE)
+plot(0, xaxt = 'n', yaxt = 'n', bty = 'n', pch = '', xlim = c(0,2800), ylim = c(0,16), ylab = '', xlab = "Date", cex.lab = 1)
+axis(1, at = seq(0,2800, by = 100), labels = c(rev(seq(0,800, by = 100)), seq(100,2000, by = 100)), tick = T, cex.axis=1)
+rect(800-800,0,(800-125), 1, col="#993404", border = NA)
+text(150,0.4, pos = 4, labels = "Iron Age")
+rect((800-125),0,(800+400), 1, col="#d95f0e", border = NA)
+text((800-150)+25,0.4, pos = 4, labels = "Roman Empire")
+rect((800+400),0,(800+1000), 1, col="#fe9929", border = NA)
+text((800+400)+50,0.4, pos = 4, labels = "Early Medieval")
+rect((800+1000),0,(800+1250), 1, col="#fec44f", border = NA)
+text((800+1000)-5,0.4, pos = 4, labels = "H.Med.")
+rect((800+1250),0,(800+1500), 1, col="#fee391", border = NA)
+text((800+1250)-5,0.4, pos = 4, labels = "L.Med.")
+rect((800+1500),0,(800+2000), 1, col="#ffffd4", border = NA)
+text((800+1500)+100,0.4, pos = 4, labels = "Modern")
+abline(v = 800, lty=3, col="black")
+COUNT <- 1.5
+
+for(s in 1:length(lowDateNegPos)) {
+  if(dataTag[orderSamples][s] == "BCE") {
+    arrows(x0 = 800-lowerDate[orderSamples][s], y0 = COUNT, 
+           x1 = 800-upperDate[orderSamples][s], y1 = COUNT, col="black", length=0, lwd = 4)
+    points(800-lowerDate[orderSamples][s]-50, COUNT, pch=countryPointCode[which(names(countryPointCode) == countryOrigin[orderSamples][s])], col="#de2d26")
+    if(str_detect(pops[orderSamples][s], "France")) {
+      text(800-upperDate[orderSamples][s], COUNT, pos = 4, labels = paste0(pops[orderSamples][s], " (", sampleSize[orderSamples][s], ")"), cex = 1, col = "#2b8cbe", font = 4)
+    } else {
+      text(800-upperDate[orderSamples][s], COUNT, pos = 4, labels = paste0(pops[orderSamples][s], " (", sampleSize[orderSamples][s], ")"), cex = 1, col = "black")
+    }
+  } else { #in case the time is in CE
+    arrows(x0 = 800+lowerDate[orderSamples][s], y0 = COUNT, 
+           x1 = 800+upperDate[orderSamples][s], y1 = COUNT, col="black", length=0, lwd = 4)
+    points(800+lowerDate[orderSamples][s]-50, COUNT, pch=countryPointCode[which(names(countryPointCode) == countryOrigin[orderSamples][s])], col="#de2d26")
+    if(str_detect(pops[orderSamples][s], "France")) {
+      text(800+upperDate[orderSamples][s], COUNT, pos = 4, labels = paste0(pops[orderSamples][s], " (", sampleSize[orderSamples][s], ")"), cex = 1, col = "#2b8cbe", font = 4)    
+    } else {
+      text(800+upperDate[orderSamples][s], COUNT, pos = 4, labels = paste0(pops[orderSamples][s], " (", sampleSize[orderSamples][s], ")"), cex = 1, col = "black")    
+    }
+  
+  }
+  COUNT <- COUNT+0.7
+}
+legend(3000,8, legend = names(countryPointCode), pch = countryPointCode, col = "#de2d26", title = "Region:")
+arrows(x0=800-50, y0=16.5, x1=800-300, y1=16.5, col = "black", length = 0.1, lwd=2, code=2)
+text((800-300)+150,16.5, pos = 1, labels = "BCE")
+arrows(x0=800+50, y0=16.5, x1=800+300, y1=16.5, col = "black", length = 0.1, lwd=2, code=2)
+text((800+300)-180,16.5, pos = 1, labels = "CE")
+dev.off()
+
+#### plot with country name before instead of point
+pops <- c("Iberia_IA", "Iberia_Iberian", "Iberia_Celtiberian", "Iberia_Visigoth_Granada", "Iberia_Visigoth_Barcelona", "Iberia_Visigoth_Girona", "Iberia_Medieval_published", "Iberia_Carolingian", "Italy_North_EarlyMedieval_Langobards", "Italy_Medieval_EarlyModern", "Italy_Medieval_EarlyModern_oCentralEuropean", "England_IA", "England_Roman", "England_Saxon",  "France_sLoire_4-6cCE", "France_sLoire_7-8cCE",  "France_nLoire_10-11cCE", "Germany_EMedieval",  "Germany_LRoman","Scandinavia_Vikings", "Iceland_Pre_Christian", "Iceland_Early_Christian")
+
+dataTag <- c("BCE", "BCE", "BCE", "CE", "CE", "CE", "CE", "CE", "CE", "CE", "CE", "BCE", "CE", "CE", "CE", "CE", "CE", "CE", "CE", "CE", "CE", "CE")
+lowerDate <- c(800, 600,400, 330, 500, 500, 680, 785, 580, 700, 1000, 240, 50, 300, 340, 600, 940, 250, 275, 700, 850, 1050)
+upperDate <- c(400, 200,220, 725, 700, 700, 990, 810, 630, 1700, 1490, 170, 350, 910, 545, 700, 1025, 650, 325, 1100, 1050, 1750)
+sampleSize <- c(6,5,3,9,5,4,4,5,18,17,11,1,6,8,2,2,1,35,1,25,24,3)
+
+#removing Iberia_IA, England_IA and Germany_LRoman
+pops <- c("Iberia_Iberian", "Iberia_Celtiberian", "Iberia_Visigoth_Granada", "Iberia_Visigoth_Barcelona", "Iberia_Visigoth_Girona", "Iberia_Medieval_published", "Iberia_Carolingian", "Italy_North_EarlyMedieval_Langobards", "Italy_Medieval_EarlyModern", "Italy_Medieval_EarlyModern_oCentralEuropean", "England_Roman", "England_Saxon",  "France_sLoire_4-6cCE", "France_sLoire_7-8cCE",  "France_nLoire_10-11cCE", "Germany_EMedieval",  "Scandinavia_Vikings", "Iceland_Pre_Christian", "Iceland_Early_Christian")
+
+dataTag <- c("BCE", "BCE", "CE", "CE", "CE", "CE", "CE", "CE", "CE", "CE", "CE", "CE", "CE", "CE", "CE", "CE", "CE", "CE", "CE")
+lowerDate <- c(600,400, 330, 500, 500, 680, 785, 580, 700, 1000, 50, 300, 340, 600, 940, 250, 700, 850, 1050)
+upperDate <- c(200,220, 725, 700, 700, 990, 810, 630, 1700, 1490,350, 910, 545, 700, 1025, 650, 1100, 1050, 1750)
+sampleSize <- c(5,3,9,5,4,4,5,18,17,11,6,8,2,2,1,35,25,24,3)
+
+######---------------
+###--------------
+
+countryOrigin <- as.character(sapply(pops, function(k) { unlist(strsplit(k, split = "_"))[1]}))
+timePeriodsList <- sapply(pops, function(k) { unlist(strsplit(k, split = "_"))[-1]})
+timePediodsLabels <- lapply(timePeriodsList, function(z) {paste0(z, collapse = "_")})
+rm(timePeriodsList)
+
+countryPointCode <- c(2,4,7,8,11,12,18)
+names(countryPointCode) <- unique(countryOrigin)
+countryLineColor <- c("#d53e4f", "#f46d43", "#abdda4", "#2b8cbe", "#5e4fa2", "#66c2a5", "#abd9e9")
+names(countryLineColor) <- unique(countryOrigin)
+
+lowDateNegPos <- lowerDate
+lowDateNegPos[which(dataTag == "BCE")] <- -c(lowDateNegPos[which(dataTag == "BCE")] )
+  #orderSamples <- order(lowDateNegPos, decreasing = F) #ordered
+orderSamples <- 1:length(lowDateNegPos)
+
+dataTag[orderSamples]
+
+png(file = paste0("/home/ialves/Dropbox/instDuThorax/REICH_SUPERDATASET_aDNA/SAMPLES", "/aDNA_samples_oneWayModels_3Nov.png"),
+    units = 'in', height = 5, width = 10, family = "FreeSans", res=600)
+par(mar=c(4,2,1,12), xpd=TRUE)
+plot(0, xaxt = 'n', yaxt = 'n', bty = 'n', pch = '', xlim = c(0,2800), ylim = c(0,14), ylab = '', xlab = "Date", cex.lab = 1)
+axis(1, at = seq(0,2800, by = 100), labels = c(rev(seq(0,800, by = 100)), seq(100,2000, by = 100)), tick = T, cex.axis=1)
+rect(800-800,0,(800-125), 1, col="#993404", border = NA)
+text(150,0.4, pos = 4, labels = "Iron Age")
+rect((800-125),0,(800+400), 1, col="#d95f0e", border = NA)
+text((800-150)+25,0.4, pos = 4, labels = "Roman Empire")
+rect((800+400),0,(800+1000), 1, col="#fe9929", border = NA)
+text((800+400)+50,0.4, pos = 4, labels = "Early Medieval")
+rect((800+1000),0,(800+1250), 1, col="#fec44f", border = NA)
+text((800+1000)-5,0.4, pos = 4, labels = "H.Med.")
+rect((800+1250),0,(800+1500), 1, col="#fee391", border = NA)
+text((800+1250)-5,0.4, pos = 4, labels = "L.Med.")
+rect((800+1500),0,(800+2000), 1, col="#ffffd4", border = NA)
+text((800+1500)+100,0.4, pos = 4, labels = "Modern")
+abline(v = 800, lty=3, col="black")
+COUNT <- 1.5
+
+for(s in 1:length(lowDateNegPos)) {
+  if(dataTag[orderSamples][s] == "BCE") {
+    arrows(x0 = 800-lowerDate[orderSamples][s], y0 = COUNT, 
+           x1 = 800-upperDate[orderSamples][s], y1 = COUNT, col=countryLineColor[which(names(countryLineColor) == countryOrigin[orderSamples][s])], length=0, lwd = 4)
+    #points(800-lowerDate[orderSamples][s]-50, COUNT, pch=countryPointCode[which(names(countryPointCode) == countryOrigin[orderSamples][s])], col="#de2d26")
+    if(str_detect(pops[orderSamples][s], "France")) {
+      text(800-upperDate[orderSamples][s], COUNT, pos = 4, labels = paste0(timePediodsLabels[orderSamples][s], " (", sampleSize[orderSamples][s], ")"), cex = 1, col = "black", font = 4) #period 
+      text(800-lowerDate[orderSamples][s]-50, COUNT, pos = 2, labels = countryOrigin[orderSamples][s], cex = 1, col = "black", font = 4) #country 
+
+    } else {
+      text(800-upperDate[orderSamples][s], COUNT, pos = 4, labels = paste0(timePediodsLabels[orderSamples][s], " (", sampleSize[orderSamples][s], ")"), cex = 1, col = "grey50")
+      text(800-lowerDate[orderSamples][s], COUNT, pos = 2, labels = countryOrigin[orderSamples][s], cex = 1, col = "grey50")
+    }
+  } else { #in case the time is in CE
+    arrows(x0 = 800+lowerDate[orderSamples][s], y0 = COUNT, 
+           x1 = 800+upperDate[orderSamples][s], y1 = COUNT, col=countryLineColor[which(names(countryLineColor) == countryOrigin[orderSamples][s])], length=0, lwd = 4)
+    #points(800+lowerDate[orderSamples][s]-50, COUNT, pch=countryPointCode[which(names(countryPointCode) == countryOrigin[orderSamples][s])], col="#de2d26")
+    if(str_detect(pops[orderSamples][s], "France")) {
+      text(800+upperDate[orderSamples][s], COUNT, pos = 4, labels = paste0(timePediodsLabels[orderSamples][s], " (", sampleSize[orderSamples][s], ")"), cex = 1, col = "black", font = 4)  
+      text(800+lowerDate[orderSamples][s], COUNT, pos = 2, labels = countryOrigin[orderSamples][s], cex = 1, col = "black", font = 4)  
+    } else {
+      text(800+upperDate[orderSamples][s], COUNT, pos = 4, labels = paste0(timePediodsLabels[orderSamples][s], " (", sampleSize[orderSamples][s], ")"), cex = 1, col = "grey50")    
+      text(800+lowerDate[orderSamples][s], COUNT, pos = 2, labels = countryOrigin[orderSamples][s], cex = 1, col = "grey50")
+    }
+  
+  }
+  COUNT <- COUNT+0.7
+}
+legend(3000,5, legend = names(countryPointCode), lty = 1, col = countryLineColor, title = "Region:", lwd = 3)
+arrows(x0=800-50, y0=15, x1=800-300, y1=15, col = "grey80", length = 0.05, lwd=2, code=2)
+text((800-300)+150,15, pos = 1, labels = "BCE", col= "grey80", cex = 0.8)
+arrows(x0=800+50, y0=15, x1=800+300, y1=15, col = "grey80", length = 0.05, lwd=2, code=2)
+text((800+300)-180,15, pos = 1, labels = "CE", col = "grey80", cex = 0.8)
+dev.off()
+```
+
+#### Computing f4-stats(O, a; b, c) using as "a" FR medieval 
+
+```{bash eval=FALSE}
+wrkDir="/sandbox/shares/mages/WGS_PREGO_Finistere_GAZEL/isabel/REICH_march2020"
+cd $wrkDir
+inputName="fr_vk_1240kHO_largest"
+#fr_vk_1240kHO_largest.fr25.ind
+#generating list of comparisons
+#outlier="Mbuti"
+outlier="Mbuti" #Mbuti, England_BellBeaker
+  
+#generating list of comparisons
+Bpop=( "FRMedieval" )  
+  
+Cpop=("cluster2") #"England_BellBeaker" #Russia_EBA_Yamnaya_Samara #Germany_CordedWare
+
+FRPOPS=( "cluster1" "cluster3" "BASSE-NORMANDIE.HAUTE-NORMANDIE" "NORD-PAS-DE-CALAIS.PICARDIE" "ALSACE.LORRAINE" "CENTRE" "LIMOUSIN.POITOU-CHARENTES" "Norwegian" "Icelandic" "Scottish" "Orcadian" "English" "Basque" "Spanish" "Spanish_North" "Italian_North" "Italian_South" "Sardinian" "Greek" "Hungarian") #England_N #Iberia_EN Germany_EN_LBK_published #England_Mesolithic_all.SG #Italy_Mesolithic.SG Luxembourg_Loschbour_published.DG
+
+cd $wrkDir
+for Dpop in ${FRPOPS[@]};
+do 
+  echo "$outlier $Bpop $Cpop $Dpop" >> fstats/f4/PREGO/input/list_Dstats_${outlier}_medFR_${Cpop}_otherFR.txt; 
+  #generating par file 
+
+done;
+(
+echo "genotypename:    /sandbox/shares/mages/WGS_PREGO_Finistere_GAZEL/isabel/FR_aDNA_medieval/calling_HOA/mergeHOA/$inputName.geno"
+echo "snpname:         /sandbox/shares/mages/WGS_PREGO_Finistere_GAZEL/isabel/FR_aDNA_medieval/calling_HOA/mergeHOA/$inputName.snp"
+echo "indivname:       /sandbox/shares/mages/WGS_PREGO_Finistere_GAZEL/isabel/FR_aDNA_medieval/calling_HOA/mergeHOA/$inputName.fr25.ind"
+echo "popfilename:     $wrkDir/fstats/f4/PREGO/input/list_Dstats_${outlier}_medFR_${Cpop}_otherFR.txt"
+echo "f4mode:   YES"
+echo "printsd:  YES"
+) > fstats/f4/PREGO/input/par.Dstats_${outlier}_medFR_${Cpop}_otherFR.par
+
+cd 
+AdmixTools/bin/qpDstat \
+-p $wrkDir/fstats/f4/PREGO/input/par.Dstats_${outlier}_medFR_${Cpop}_otherFR.par \
+> $wrkDir/fstats/f4/PREGO/output/par.Dstats_${outlier}_medFR_${Cpop}_otherFR.log
+
+```
+
+
+
+To tets the robusteness of the qpAdm tests one should try different outgroup populations. Marcus et al (aDNA genetics of Sardinia) chose two groups of "outgroups": 
+
+1) Ami, Biaka, Bougainville, Chukchi, Eskimo, Han, Ju-hoan-North,Karitiana,  Mbuti,  Papuan,  She,  Ulchi,  Yoruba
+
+2)  Mota, UstIshim, Kostenki14, GoyetQ116-1, Vestonice16, MA1, ElMiron, Villabruna,  WHG,  EHG,  CHG,  Iran-N,  Natufian,  Levant-N,  Anatolia-N)
+
+In the Genetics of France we took:
+
+3) Mbuti, AfontovaGora3, ElMiron, Karitiana, MA1, Papuan, Ust_Ishim, Vestonice16, Villabruna, GoyetQ116-1
+
+ 
+Note: Morocco_Iberomaurusian has also been added in Olalde 2018 and Olalde 2019
+
+wrkDir="/LAB-DATA/BiRD/shares/ITX/mages/WGS_PREGO_Finistere_GAZEL/isabel/REICH_march2020/fstats/f4/PREGO/output/"
+cd $wrkDir;
+mkdir summary
+for f in `find . -name '*BritainMeso*.log'`; 
+do echo $f; echo "";
+pops=()
+pops=`cat $f | grep 'result:' | awk '{print $3}' | sort | uniq -c | awk '{print $2}'`;
+echo "${pops[@]}"
+for p in ${pops[@]};
+do 
+grep 'result:' $f | grep $p | sort -k8 -n >> summary/summary_${p}.sum;
+done
+done
+
+
+
+

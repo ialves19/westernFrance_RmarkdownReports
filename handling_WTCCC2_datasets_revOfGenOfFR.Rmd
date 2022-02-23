@@ -1,0 +1,145 @@
+---
+title: "Handling WTCCC2 datasets - Rev Gen of France"
+author: "Isabel Alves"
+date: "10/15/2019"
+output: html_document
+---
+
+## Brief description
+In here, I describe the steps done to produce the datasets required to address the questions rised by the reviewers of the Genetics of France. I downloaded the WTCCC2 datasets Ref Nb: EGAD00000000120 (multiple sclerosis, MS), EGAD00010000124 (Psoriasis, PS) and EGAD00010000632 (PoBI). The MS and PS genotypes were genotyped on the Human670-QuadCustom v1-A SNP array whereas PoBI dataset was genotyped on the Human1-2M-DuoCustom SNP array. 
+
+The three datasets are stored in the BiRD cluster in the following dir: 
+1) MS & PS: "/sandbox/shares/mages/WGS_PREGO_Finistere_GAZEL/isabel/FR_WGS/MS_PS_datasets"
+2) PoBI:"/sandbox/shares/mages/WGS_PREGO_Finistere_GAZEL/isabel/FR_WGS/PoBI"
+
+PoBI is the Peopling of the British Islands dataset and contains only UK samples. MS contains samples from multiple European and non European countries: Australia, New Zeland, US, Belgium, Denmark, Finland, France, Germany, Italy, UK, N. Ireland, Norway, Poland, Spain and Sweden.  
+PS encompasses samples from Ireland and UK. 
+
+PoBI: 2912 individuals and 824970 SNPs
+MS: 11376 individuals and 464280 SNPs
+PS: 2622 individuals and 521372 SNPs
+
+Below I describe the steps required to transform the .gen into binary plink files bed/bim/fam files with the alleles in the (+) strand. 
+
+1) Transform .gen file in .ped/.map file with gtool. gtool is also able to subset samples and SNPs in order to exclude sites/samples that didn't follow the QC stats (provided with the dataset). In a second step genotypes codified as probabilities are exported assuming a given threshold (.90). NOTE: because plink internally converts a ped file into binary one needs to BE CAREFUL with the order of the alleles. Also, plink does not look at the .map file accompaining the .ped. Therefore, one needs to export the genotypes in ATGC instead of 12 (--alleles --snp). Missing data will be converted into 'N'. 
+
+```{bash eval = FALSE}
+   gtool -S --g <gen file name.gen> --s <sample file name.sample> --sample_id <name of the file containing samples to keep> --inclusion <name of the file containing the SNPs to keeo> --og <output file name.gen>
+    #converting .gen to .ped, lhood probability > .90 and recoding alleles as ATGC (--snp), missing genoytpes are: 'N'
+    gtool -G --g <output of the command above> --s <sample file.sample.subset> --chr <chr nb> --alleles --threshold 0.90 --snp --ped <outputFile.ped> --map <outputFile.map>
+
+```
+
+
+2) Convert ped/map files produced by gtool into binary plink files. To avoid plink switch the alleles a1 and a2 alleles according to their frequency or create new alleles corresponding to missing data first we need to create a text file with allele a1 and run plink as follows:
+
+```{bash eval = FALSE}
+
+    #converting to .bed, recoding 12 means that the allele 1 will be provided in a file generated as following:
+    cat <map file created above.map> | awk '{printf("%s\t%s\n", $2,$5);}' > <text file containing a1 allele>
+    #plink --file ${wkingDir}/${outputFName} --missing-genotype 'N' --recode 12 --make-bed --out ${wkingDir}/${outputFName}_rec
+    plink --file <ped/map files created by gtool> --missing-genotype 'N' --a1-allele <text file containing a1 allele> --make-bed --out <output file name>
+
+```
+
+3) flip alleles that are in the negative (-) strand according to the corresponding strand file <https://www.well.ox.ac.uk/~wrayner/strand/>. The strand file assumes the alleles in the bim file are the illumina TOP alleles. Thus, we MUST to run a R script checking if the alleles are in the TOP configuration and such information can be found here: <https://www.well.ox.ac.uk/~wrayner/strand/ABtoTOPstrand.html>. In principle most of the alleles will be in TOP but the few ones that are not will be removed. After removing these alleles from the bed/bim/fam the Rscript checking for TOP alleles is re-run to confirm. 
+
+```{bash eval = FALSE}
+    #checkign if alleles are in TOP
+    Rscript --vanilla checkingTOPalleles.R <working dir> <bim file to check.bim> <TOP alleles file from the website above> <chr Nb>
+    if [ -f <working dir>/notOnTOP_SNPs_chr<chr Nb>.txt ];
+    then
+        echo ""
+        echo "Removing sites not on TOP"
+        echo ""
+        #removing sites not in TOP 
+        plink --bfile <bed/bim/fam files> --exclude <working dir>/notOnTOP_SNPs_chr<chr Nb>.txt --keep-allele-order --make-bed --out <output bed/bim/fam>
+        #re-cheking TOP conf
+        Rscript --vanilla checkingTOPalleles.R <working dir> <bim file to check.bim> <TOP alleles file from the website above> <chr Nb>
+    else 
+        echo ""
+        echo "All sites are on TOP configuration."
+        echo ""
+    fi
+
+    Rscript --vanilla gettingSNPsToFlip.R <working dir> <bim file to check.bim> <strand file from the website above> <chr Nb>
+    plink --bfile <input bed/bim/fam> --flip <alleles to flip file> --keep-allele-order --make-bed --out <output bed/bim/fam>
+
+```
+
+4) The physical positions of the WTCCC2 datasets are in hg18. Because we want to merge with our in house datasets which are in hg19, we need to use the liftOver tool <https://genome.ucsc.edu/cgi-bin/hgLiftOver> from the UCSC to change the coordinates. First, we need to create a .bed file (chrID start end) with the hg18 positions to lift and then use the liftover (installed locally) to convert the coordinates. The chain file needs to be downloaded locally. 
+
+```{bash eval=FALSE}
+
+cat <working dir>/<prefixFile>_rec_allTOP_strand.bim | awk '{OFS="\t"};{print $1, $4-1, $4}' | sed 's/^/chr/' > <working dir>/map.chr${chrID}_1.bed
+liftOver <working dir>/map.chr${chrID}_1.bed <path to chain file>/hg18ToHg19.over.chain <working dir>/map.chr${chrID}_1.new.bed <working dir>/map.chr${chrID}_1.error
+
+```
+
+5) Importantly, some coordinates will not be converted. Therefore, the SNPs corresponding to those sites need to be removed to avoid issues ahead. 
+
+``` {bash eval=FALSE}
+    liftError=`wc -l ${wkingDir}/map.chr${chrID}_1.error | cut -d$' ' -f1`
+    if [ $liftError -ge 2 ]; 
+    then  
+        grep chr$chrID ${wkingDir}/map.chr${chrID}_1.error | awk '{print $3}' | while read Pos; do grep -n $Pos ${wkingDir}/${outputFName}_rec_allTOP_strand.bim | cut -d$'\t' -f2 >> ${wkingDir}/noLift_chr$chrID.txt; done;
+        plink --bfile ${wkingDir}/${outputFName}_rec_allTOP_strand --exclude ${wkingDir}/noLift_chr$chrID.txt --keep-allele-order --make-bed --out ${wkingDir}/${outputFName}_rec_allTOP_strand_lift
+        cat ${wkingDir}/${outputFName}_rec_allTOP_strand_lift.bim | awk '{OFS="\t"};{print $1, $4-1, $4}' | sed 's/^/chr/' > ${wkingDir}/map.chr${chrID}_2.bed
+        liftOver ${wkingDir}/map.chr${chrID}_2.bed $HOME/hg18ToHg19.over.chain ${wkingDir}/map.chr${chrID}_2.new.bed ${wkingDir}/map.chr${chrID}_2.error
+        #transform .bim file accordingly
+        paste -d'\t' <(cut -d$'\t' -f1,2,3 ${wkingDir}/${outputFName}_rec_allTOP_strand_lift.bim) <(awk -F'\t' '{print $3}' ${wkingDir}/map.chr${chrID}_2.new.bed) <(cut -d$'\t' -f5,6 ${wkingDir}/${outputFName}_rec_allTOP_strand_lift.bim) > ${wkingDir}/${outputFName}_rec_allTOP_strand_tmp.bim
+        cp ${wkingDir}/${outputFName}_rec_allTOP_strand_lift.bed ${wkingDir}/${outputFName}_rec_allTOP_strand_tmp.bed
+        cp ${wkingDir}/${outputFName}_rec_allTOP_strand_lift.fam ${wkingDir}/${outputFName}_rec_allTOP_strand_tmp.fam
+
+    else
+
+        #transform .bim file accordingly
+        paste -d'\t' <(cut -d$'\t' -f1,2,3 ${wkingDir}/${outputFName}_rec_allTOP_strand.bim) <(awk -F'\t' '{print $3}' ${wkingDir}/map.chr${chrID}_1.new.bed) <(cut -d$'\t' -f5,6 ${wkingDir}/${outputFName}_rec_allTOP_strand.bim) > ${wkingDir}/${outputFName}_rec_allTOP_strand_lift.bim
+        cp ${wkingDir}/${outputFName}_rec_allTOP_strand.bed ${wkingDir}/${outputFName}_rec_allTOP_strand_tmp.bed
+        cp ${wkingDir}/${outputFName}_rec_allTOP_strand.fam ${wkingDir}/${outputFName}_rec_allTOP_strand_tmp.fam
+        cp ${wkingDir}/${outputFName}_rec_allTOP_strand_lift.bim ${wkingDir}/${outputFName}_rec_allTOP_strand_tmp.bim
+
+    fi
+```
+
+6) Sites not in equilibrium Hardy-Weinberg are removed as well as HLA region for the chromosomes six. 
+
+```{bash eval=FALSE} 
+    #filtering according to hwe
+    plink -bfile ${wkingDir}/${outputFName}_rec_allTOP_strand_tmp --hwe 1e-5 --keep-allele-order --make-bed --out ${wkingDir}/${outputFName}_rec_allTOP_strand_hwe1e-5
+    rm ${wkingDir}/${outputFName}_rec_allTOP_strand_tmp.*
+
+    #remove HLA regions #Zabaneh et al 2016 Scientific reports
+    if [ "$chrID" == "6" ]
+    then
+        plink -bfile ${wkingDir}/${outputFName}_rec_allTOP_strand_hwe1e-5 --exclude-snp --from-bp 29691116 --to-bp 33054976 --keep-allele-order --make-bed --out ${wkingDir}/${outputFName}_${wkingDir}/${outputFName}_rec_allTOP_strand_hwe1e-5
+    fi
+```
+
+7) Then, we check for duplicated sites, multiallelic sites split off in multiple lines, and remove those. 
+
+```{bash eval=FALSE}
+
+plink -bfile ${wkingDir}/${outputFName}_rec_allTOP_strand_hwe1e-5 --list-duplicate-vars --out ${wkingDir}/${outputFName}_to_exclude
+plink -bfile ${wkingDir}/${outputFName}_rec_allTOP_strand_hwe1e-5 --exclude ${wkingDir}/${outputFName}_to_exclude.dupvar --keep-allele-order --make-bed --out ${wkingDir}/${outputFName}_rec_allTOP_strand_hwe1e-5_noDup_tmp
+
+
+```
+
+8) Finally, for the remaining sites we extract the REF allele from the Human reference as following: This step can be removed (commenting out) if the aim is not to merge with vcf files later in the process as it takes quite long time to retrieve the REF allele for hundreds of thousands ot sites. 
+
+```{bash eval=FALSE}
+grep ^$chrID <working dir>/<file prefix>_rec_allTOP_strand_hwe1e-5_noDup.bim | awk '{printf("chr%s:%s-%s\n", $1,$4,$4);}' | while read P; do samtools faidx <path to the fasta file with the human reference> ${P}; done  > <working dir>/referenceAllele_chr${chrID}_hg19.out
+#checking whether the ref is one of the alleles in the bim file
+Rscript --vanilla checking_matchWRefhg19.R <working dir> <file prefix>_rec_allTOP_strand_hwe1e-5_noDup.bim referenceAllele_chr${chrID}_hg19.out $chrID
+ 
+```
+
+This pipeline is implemented in the script treatingPoBI_data.bash and it can be run as indicated below for any type of snps array .gen files. Top alleles and strand file MUST be in the working directory. 
+
+```{bash eval=FALSE}
+for i in `seq 1 22`; do qsub -S /bin/bash -cwd -N job_${i} -o job_${i}_o -e job_${i}_e treatingPoBI_data.bash <working dir> <input file name> <sample file name> <file name with samples to keep> <file name with the snps to keep> <path to the human ref> <top file name> <strand file name>; done
+
+```
+
+

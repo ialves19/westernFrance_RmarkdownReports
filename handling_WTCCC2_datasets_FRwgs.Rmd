@@ -1,0 +1,266 @@
+---
+title: "Handling_WTCCC2 datasets - FR WGS"
+author: "Isabel Alves"
+date: "10/25/2019"
+output:
+  pdf_document: default
+  html_document: default
+---
+
+## Brief description
+This report is the follow up of the handling_WTCCC2_datasets_revOfGenofFR. With:
+
+1) the French whole genomes
+2) the PoBI dataset
+3) the MS and PS datasets 
+
+in hand we are now able to explore the relationship between the French populations and the neighbour populations and confirm the largest ancestry sharing between Brittany and Iceland/Norway. 
+The samples sizes available are the following:
+
+Samples | Country
+--------|--------
+566     | Belgium
+363     | Denmark
+652     | Finland
+536     | France
+1166    | Germany
+776     | Italy
+73      | NIreland
+1030    | Norway
+59      | Poland
+211     | Spain
+1401    | Sweden
+2048    | UK
+2578    | UK (PoBI)
+
+In order to compute f-statistics we need to have an outgroup, which I chose to be the Mbuti.
+
+
+#### **Treating Mbuti samples**
+
+I downloaded the high coverage Mbuti genomes from the <https://reichdata.hms.harvard.edu/pub/datasets/sgdp/>. They are stored in the BiRD cluster in the following folder: /sandbox/users/alves-i/FR_WGS/SIMONS_PROJ . The three Mbuti whole-genomes were download as per-sample vcfs. They were merged with bcftools and only biallelic snps were kept: 
+
+```{bash eval=FALSE}
+module load bcftools
+cd /sandbox/users/alves-i/FR_WGS/SIMONS_PROJ
+
+# to avoid multiallelic sites we used -m none and to recreate the sample-specific monomorphic sites we used -0 option, which assumes that any missing genotypes represent homozygous REF
+bcftools merge -m none -0 -O z -o Mbuti.SimonsProj.vcf.gz LP6005592-DNA_C03.annotated.nh2.variants.vcf.gz LP6005441-DNA_B08.annotated.nh2.variants.vcf.gz LP6005441-DNA_A08.annotated.nh2.variants.vcf.gz
+bcftools index -t Mbuti.SimonsProj.vcf.gz
+bcftools view -m2 -M2 -v snps -O z -o Mbuti.SimonsProj.snps.vcf.gz Mbuti.SimonsProj.vcf.gz
+bcftools index -t Mbuti.SimonsProj.snps.vcf.gz
+
+```
+
+
+
+#### **Treating FR wgs**
+In order to merge the FR wgs with the Mbuti genomes we concatenated all the per chromosome vcf into a final vcf file (125G). NOTE: I tried to merge with plink and using plink binary files but there was inconsistency of alleles, which plink doesn't know how to solve. 
+
+```{bash eval=FALSE}
+
+module load bcftools
+cd /sandbox/users/alves-i/FR_WGS/vcfs_no_filters
+#concatenate FR wgs across chromosomes
+for i in `seq 1 22`; do echo 20180323.FRENCHWGS.REF0002.chr${i}.onlysnps.hwe1e4.maxmiss.90.recode.vcf.gz >> listFileForBcftools.txt; done
+bcftools concat -f listFileForBcftools.txt -O z -o FRwgs.allCHROM.snps.hwe.maxmiss90.vcf.gz
+bcftools index -t FRwgs.allCHROM.snps.hwe.maxmiss90.vcf.gz
+
+```
+#### **Merging FR wgs and SIMON's PROJECT Mbuti**
+To merge the FRwgs and the Mbuti wgs I used bcftools to merge vcfs and then used plink to convert a vcf containing all the WGS (FR + SP Mbuti) into binary plink files. 
+Given the size of the merged vcf file (>125G) I set a MAC threshold to remove most of the very rare SNVs while trying to maximize the number of sites overlapping between the WGSs and the SNP chip data available for the MS and PS datasets. 
+
+```{bash eval=FALSE}
+module load bcftools
+
+#merge FRwgs and Mbuti with BCFTOOLS
+bcftools merge -m none -0 -O z -o Mbuti.SimonsProj.vcf.gz LP6005592-DNA_C03.annotated.nh2.variants.vcf.gz LP6005441-DNA_B08.annotated.nh2.variants.vcf.gz LP6005441-DNA_A08.annotated.nh2.variants.vcf.gz
+bcftools index -t Mbuti.SimonsProj.vcf.gz
+bcftools view -m2 -M2 -v snps -O z -o Mbuti.SimonsProj.snps.vcf.gz Mbuti.SimonsProj.vcf.gz
+bcftools index -t Mbuti.SimonsProj.snps.vcf.gz
+bcftools merge -0 -m none -O z -o /sandbox/users/alves-i/FR_WGS/vcfs_no_filters/FRwgs_Mbuti.allCHROM.snps.vcf.gz /sandbox/users/alves-i/FR_WGS/vcfs_no_filters/FRwgs.allCHROM.snps.hwe.maxmiss90.vcf.gz /sandbox/users/alves-i/FR_WGS/SIMONS_PROJ/Mbuti.SimonsProj.snps.vcf.gz
+
+#to decrease the nb of SNVs we set up a MAC threshold (MAC > 10)
+bcftools view --min-ac 10 -O z -o /sandbox/users/alves-i/FR_WGS/vcfs_no_filters/FRwgs_Mbuti.allCHROM.snps.mac10.vcf.gz /sandbox/users/alves-i/FR_WGS/vcfs_no_filters/FRwgs_Mbuti.allCHROM.snps.vcf.gz
+
+#remove tri-allelic sites after merging FRwgs and Mbuti
+bcftools view -m2 -M2 -v snps -Oz -o /sandbox/users/alves-i/FR_WGS/vcfs_no_filters/FRwgs_Mbuti.allCHROM.snps.bi.mac10.vcf.gz /sandbox/users/alves-i/FR_WGS/vcfs_no_filters/FRwgs_Mbuti.allCHROM.snps.mac10.vcf.gz
+bcftools index -t FRwgs_Mbuti.allCHROM.snps.bi.mac10.vcf.gz
+#convert in binary plink format
+#plink 1.9.0 does not handle .vcf.gz
+/sandbox/users/alves-i/plink2 --vcf /sandbox/users/alves-i/FR_WGS/vcfs_no_filters/FRwgs_Mbuti.allCHROM.snps.bi.mac10.vcf.gz --make-bed --keep-allele-order --out /sandbox/users/alves-i/FR_WGS/plink/plinkFiles/FRwgs_Mbuti.allCHROM.snps.bi.mac10 
+#change .bim file such as rsID is replaced by chrNb:Pos
+cat /sandbox/users/alves-i/FR_WGS/plink/plinkFiles/FRwgs_Mbuti.allCHROM.snps.bi.mac10.bim | awk '{OFS="\t";print $1,$1":"$4,$3,$4,$5,$6}' >  /sandbox/users/alves-i/FR_WGS/plink/plinkFiles/FRwgs_Mbuti.allCHROM.snps.bi.mac10.bis.bim
+
+```
+
+#### **Handling the MS and PS datasets**
+MS and PS datasets were processed according to the report: "handling_WTCCC2_datasets_revOfGenOfFR.*". The joint dataset was then processed in order to keep in the a2 column (col nb 6 of the .bim files) the REF allele. 
+
+```{bash eval=FALSE}
+#create a file with rsID and REF allele from the .bim file we want to force a2 alleles to be the REF. 
+paste <(cat MS.PS.allCHROM.EUR.IRE.bim | awk '{print $2}') <(cat MS.PS.allCHROM.EUR.IRE.bim | awk '{printf("chr%s:%s-%s\n", $1,$4,$4);}' | while read Pos; do grep -A 1 "$Pos" EGAD00000000120/calls/referenceAllele_allCHROM_hg19.out; done | grep -v "^>") > REF_allele.plink
+
+plink --noweb --bfile MS.PS.allCHROM.EUR.IRE --a2-allele REF_allele.plink --make-bed --out MS.PS.allCHROM.EUR.IRE.wREF
+#get sites for which the REF was not possible to assign
+grep Warning: MS.PS.allCHROM.EUR.IRE.wREF.log | cut -d$' ' -f8 | sed -e 's/\.//g' > sitesToExclude_noREF.txt
+plink --bfile MS.PS.allCHROM.EUR.IRE.wREF --exclude sitesToExclude_noREF.txt --keep-allele-order --make-bed --out MS.PS.allCHROM.EUR.IRE.allREF
+
+
+cat /sandbox/users/alves-i/FR_WGS/MS_PS_datasets/MS.PS.allCHROM.EUR.IRE.allREF.bim | awk '{OFS="\t";print $1,$1":"$4,$3,$4,$5,$6}' > /sandbox/users/alves-i/FR_WGS/MS_PS_datasets/MS.PS.allCHROM.EUR.IRE.allREF.bis.bim
+
+#first merge attempt
+#this gives us a list of sites missing or with incompatible alleles
+# merge-mode 4 = never overwrite
+plink --noweb --memory 5000 --bfile /sandbox/users/alves-i/FR_WGS/MS_PS_datasets/MS.PS.allCHROM.EUR.IRE.allREF.bis --bmerge /sandbox/users/alves-i/FR_WGS/plink/plinkFiles/FRwgs_Mbuti.allCHROM.snps.bi.mac10.bis --merge-mode 4 --keep-allele-order --make-bed --out /sandbox/users/alves-i/FR_WGS/plink/plinkFiles/FRwgs_Mbuti.MS_PS.allCHROM.snps.bi
+
+plink --noweb --memory 5000 --bfile /sandbox/users/alves-i/FR_WGS/MS_PS_datasets/MS.PS.allCHROM.EUR.IRE.allREF.bis --exclude /sandbox/users/alves-i/FR_WGS/plink/plinkFiles/FRwgs_Mbuti.MS_PS.allCHROM.snps.bi-merge.missnp --keep-allele-order --make-bed --out /sandbox/users/alves-i/FR_WGS/MS_PS_datasets/MS.PS.allCHROM.EUR.IRE.allREF.bis.clean
+
+plink --noweb --memory 5000 --bfile /sandbox/users/alves-i/FR_WGS/plink/plinkFiles/FRwgs_Mbuti.allCHROM.snps.bi.mac10.bis --exclude /sandbox/users/alves-i/FR_WGS/plink/plinkFiles/FRwgs_Mbuti.MS_PS.allCHROM.snps.bi-merge.missnp --keep-allele-order --make-bed --out /sandbox/users/alves-i/FR_WGS/plink/plinkFiles/FRwgs_Mbuti.allCHROM.snps.bi.mac10.bis.clean
+
+```
+
+Then, one needs to find the overlapping sites between the FRwgs_Mbuti and MS.PS datasets. For that I used R. 
+
+```{bash eval=FALSE}
+module load R
+module load plink
+
+#R
+WGS_pos <- read.table("/sandbox/users/alves-i/FR_WGS/plink/plinkFiles/FRwgs_Mbuti.allCHROM.snps.bi.mac10.bis.clean.bim", header=FALSE)
+MS_pos <- read.table("/sandbox/users/alves-i/FR_WGS/MS_PS_datasets/MS.PS.allCHROM.EUR.IRE.allREF.bis.clean.bim", header=FALSE)
+
+#REMOVE below
+WGS_pos <- read.table("/sandbox/users/alves-i/FR_WGS/MS_PS_datasets/MS.PS.allCHROM.EUR.IRE.allREF.bis.clean.bim", header=FALSE)
+
+inters_pos <- intersect(WGS_pos[,2], MS_pos[,2])
+
+write.table(matrix(inters_pos, ncol=1), file="/sandbox/users/alves-i/FR_WGS/plink/plinkFiles/inters_pos_WGS_MS_PS.txt", quote=FALSE, row.names=FALSE, col.names=FALSE, sep="\t")
+#q()
+
+plink --noweb --memory 5000 --bfile /sandbox/users/alves-i/FR_WGS/MS_PS_datasets/MS.PS.allCHROM.EUR.IRE.allREF.bis.clean --bmerge /sandbox/users/alves-i/FR_WGS/plink/plinkFiles/FRwgs_Mbuti.allCHROM.snps.bi.mac10.bis.clean --extract /sandbox/users/alves-i/FR_WGS/plink/plinkFiles/inters_pos_WGS_MS_PS.txt --keep-allele-order --make-bed --out /sandbox/users/alves-i/FR_WGS/plink/plinkFiles/FRwgs_Mbuti.MS_PS.allCHROM.snps.bi.clean
+
+```
+The overlapping dataset contains 447,914 sites. 
+
+#### **Generating a PCA from the FRwgs and MS_PS datasets**
+The first step to generate a PCA is to prune SNPs in order to keep an independent set of sites. Before converting the binary plink files into EIGENSTRAT format one needs to change the last colunm status from -9 to 1. Otherwise, samples will not be included in the new EIGENSTRAT file type. Also .fam file containing ind description needs to have .pedind extension (at least according to CONVERT README - EIG package). 
+
+```{bash eval=FALSE}
+module load plink 
+plink --noweb --memory 5000 --bfile /sandbox/users/alves-i/FR_WGS/plink/plinkFiles/FRwgs_Mbuti.MS_PS.allCHROM.snps.bi.clean --indep-pairwise 50 5 0.5 --out /sandbox/users/alves-i/FR_WGS/plink/plinkFiles/LD_prune
+plink --noweb --memory 5000 --bfile /sandbox/users/alves-i/FR_WGS/plink/plinkFiles/FRwgs_Mbuti.MS_PS.allCHROM.snps.bi.clean --extract /sandbox/users/alves-i/FR_WGS/plink/plinkFiles/LD_prune.prune.in --make-bed --keep-allele-order --out /sandbox/users/alves-i/FR_WGS/plink/plinkFiles/FRwgs_Mbuti.MS_PS.allCHROM.snps.bi.clean.pruned
+
+sed 's/-9/1/g' /sandbox/users/alves-i/FR_WGS/plink/plinkFiles/FRwgs_Mbuti.MS_PS.allCHROM.snps.bi.clean.pruned.fam > /sandbox/users/alves-i/FR_WGS/plink/plinkFiles/FRwgs_Mbuti.MS_PS.allCHROM.snps.bi.clean.pruned.tmp.fam
+
+COUNT=0; cat /sandbox/users/alves-i/FR_WGS/plink/plinkFiles/FRwgs_Mbuti.MS_PS.allCHROM.snps.bi.clean.pruned.tmp.fam | awk '{print $2}' | while read ind; do ((COUNT++)); echo $COUNT >> /sandbox/users/alves-i/FR_WGS/plink/plinkFiles/ind_nb_tmp_fam.txt; echo $ind; done
+
+paste <(cat /sandbox/users/alves-i/FR_WGS/plink/plinkFiles/ind_nb_tmp_fam.txt) <(cat /sandbox/users/alves-i/FR_WGS/plink/plinkFiles/FRwgs_Mbuti.MS_PS.allCHROM.snps.bi.clean.pruned.tmp.fam | awk '{print $2,$3,$4,$5,$6}') > sandbox/users/alves-i/FR_WGS/plink/plinkFiles/FRwgs_Mbuti.MS_PS.allCHROM.snps.bi.clean.pruned.fam
+
+cp /sandbox/users/alves-i/FR_WGS/plink/plinkFiles/FRwgs_Mbuti.MS_PS.allCHROM.snps.bi.clean.pruned.fam /sandbox/users/alves-i/FR_WGS/plink/plinkFiles/FRwgs_Mbuti.MS_PS.allCHROM.snps.bi.clean.pruned.pedind
+
+
+#convert .bed/.bim/.fam into .geno/.snp/.ind with EIG software
+wrkDir="/sandbox/users/alves-i/FR_WGS/plink/plinkFiles"
+fname="FRwgs_Mbuti.MS_PS.allCHROM.snps.bi.clean.pruned"
+
+(
+echo "genotypename:    $wrkDir/$fname.bed"   
+echo "snpname:         $wrkDir/$fname.bim"
+echo "indivname:       $wrkDir/$fname.pedind"
+echo "outputformat:    EIGENSTRAT"
+echo "genotypeoutname: $wrkDir/$fname.geno"
+echo "snpoutname:      $wrkDir/$fname.snp"
+echo "indivoutname:    $wrkDir/$fname.ind"
+echo "familynames:     NO"
+) > $wrkDir/convert.input
+
+EIG-6.1.4/bin/convertf -p $wrkDir/convert.input > $wrkDir/convert.input.log
+
+#to generate a file with the pop corresponding to each of the ind in the .ind file 
+COUNT=0; cat FRwgs_Mbuti.MS_PS.allCHROM.snps.bi.clean.pruned.ind | awk '{print $1}' | while read indID; do ((COUNT++)); echo $COUNT; if [ $COUNT -le 856 ]; then region=`grep $indID $HOME/samples/sampleID_withCohort.txt | awk '{print $2}'`; if [ -z "$region" ]; then region="OTHERS"; echo $region >> /sandbox/users/alves-i/FR_WGS/plink/plinkFiles/ind_population.pop; else echo $region >> /sandbox/users/alves-i/FR_WGS/plink/plinkFiles/ind_population.pop; fi; elif [ $COUNT -gt 856 ] && [ $COUNT -le 859 ]; then region="Mbuti"; echo $region >> /sandbox/users/alves-i/FR_WGS/plink/plinkFiles/ind_population.pop; else indTag=`echo $indID | cut -d$':' -f2`; region=`grep $indTag /sandbox/users/alves-i/FR_WGS/MS_PS_datasets/EUR_IRE_samplesInFam.txt | awk '{print $2}'`; echo $region >> /sandbox/users/alves-i/FR_WGS/plink/plinkFiles/ind_population.pop; fi; done
+
+cd /sandbox/users/alves-i/FR_WGS/plink/plinkFiles/
+paste -d" ", <(cat FRwgs_Mbuti.MS_PS.allCHROM.snps.bi.clean.pruned.ind | awk '{print $1,$2}') <(cat ind_population.pop) > FRwgs_Mbuti.MS_PS.allCHROM.snps.bi.clean.pruned.bis.ind
+mv FRwgs_Mbuti.MS_PS.allCHROM.snps.bi.clean.pruned.bis.ind FRwgs_Mbuti.MS_PS.allCHROM.snps.bi.clean.pruned.ind
+(
+echo "genotypename:  $wrkDir/$fname.geno"
+echo "snpname:       $wrkDir/$fname.snp"
+echo "indivname:     $wrkDir/$fname.ind"
+echo "evecoutname:   /sandbox/users/alves-i/FR_WGS/plink/pca/FRwgs_Mbu_MS_PS/WGS.evec"
+echo "evaloutname:   /sandbox/users/alves-i/FR_WGS/plink/pca/FRwgs_Mbu_MS_PS/WGS.eval"
+echo "deletesnpoutname: EIG_removed_SNPs"
+echo "numoutevec: 10"
+echo "fsthiprecision: YES"
+) /sandbox/users/alves-i/FR_WGS/plink/pca/FRwgs_Mbu_MS_PS/smarpca.WGS.txt
+
+EIG-6.1.4/bin/smartpca -p /sandbox/users/alves-i/FR_WGS/plink/pca/FRwgs_Mbu_MS_PS/smarpca.WGS.txt
+
+#keep outliers in a file to exclude in further analyses
+grep REMOVED /sandbox/users/alves-i/FR_WGS/plink/pca/logFile.log | awk '{print $3}' > /sandbox/users/alves-i/FR_WGS/plink/pca/outliers.inds
+
+```
+
+#### **fstats**
+IMPORTANTE: f3-outgroup stats was computed with the Admixtools package. SP's Mbuti samples were considered outgroup. However, the values retrieved were completely out of the range. 
+
+Source 1 | Source 2 | Target | f_3 | std. err | Z | SNPs |
+---------|----------|--------|-----|----------|---|------|
+NORD-PAS-DE-CALAIS.PICARDIE | Belgium | Mbuti | 1855136988335799.250000 | 3502672109861.738281 | 529.635 | 447176 |
+NORD-PAS-DE-CALAIS.PICARDIE | Denmark | Mbuti | 1854113336295853.000000 | 3517124901292.573730 | 527.167 | 447132 |
+NORD-PAS-DE-CALAIS.PICARDIE | Finland | Mbuti | 1850808214487517.500000 | 3451250010678.089355 | 536.272 | 447140 |
+
+I also computed f3-stats in the form of target; source 1, source 2 and the values were not out of range, suggesting that the large values above might be due to some artifact with SP's Mbuti samples. However, the source of the problem may originate from multiple aspects of the data in comparison with the HOA: 1) large samples sizes, 2) wrong assignment of the REF allele. Admixtools assumes that REF allele is the a1-allele in a bim file instead of the a2 as I originally created the files. Nonetheless, by correcting this and downsampling the samples to 25 individuals did not change the magnitude of the values. Together this suggests AGAIN that SP's Mbuti samples may suffer from kind of bias. 
+
+To solve this issue I replaced SP Mbuti's by the HGDP samples freely available on: <https://www.hagsc.org/hgdp/files.html>. They are stored in the BiRD cluster: /sandbox/shares/mages/WGS_PREGO_Finistere_GAZEL/isabel/MS_PS_datasets/HGDP. Genomic coordinates were lifted following the same procedures as those implemented for the MS and PS datasets (see above). 
+The merged dataset is: FRwgs_HGDPMbuti.MS_PS.REFa1.bed/.bim/.fam and contains: 447,279 SNPs. 
+
+### **Run supervised ADMIXTURE**
+
+
+```{bash eval=FALSE}
+###########################
+##
+## Launch admixture supervised
+##
+###########################
+
+#generate a .pop file with the pop corresponding to the ind in the .fam file
+cd ~/FR_WGS/plink/plinkFiles/
+
+cat FRwgs_Mbuti.MS_PS.allCHROM.snps.bi.clean.pruned.new.fam | awk '{print $2}' | while read ind; do grep $ind FRwgs_Mbuti.MS_PS.allCHROM.snps.bi.clean.pruned.ind | cut -d$' ' -f3; done >> FRwgs_Mbuti.MS_PS.allCHROM.snps.bi.clean.pruned.new.pop
+
+#keep only the three sources and the FRWGS pops 
+paste FRwgs_Mbuti.MS_PS.allCHROM.snps.bi.clean.pruned.new.fam FRwgs_Mbuti.MS_PS.allCHROM.snps.bi.clean.pruned.new.pop | grep -v "Belgium" | grep -v "Denmark" | grep -v "Finland" | grep -v "France" | grep -v "Italy" | grep -v "Mbuti" | grep -v "NIreland" | grep -v "Norway" | grep -v "OTHERS" | grep -v "Poland" | grep -v "Sweden" | grep -v "UK" | cut -d$'\t' -f1 | cut -d$' ' -f1-2 > keep_list_for_admixt.adm
+
+module load plink 
+mv FRwgs_Mbuti.MS_PS.allCHROM.snps.bi.clean.pruned.new.fam FRwgs_Mbuti.MS_PS.allCHROM.snps.bi.clean.pruned.fam
+
+plink --noweb --memory 5000 --bfile FRwgs_Mbuti.MS_PS.allCHROM.snps.bi.clean.pruned --keep keep_list_for_admixt.adm --make-bed --keep-allele-order --out FRwgs_Mbuti.MS_PS.allCHROM.snps.bi.clean.pruned.ADMIXTSUPER
+
+paste FRwgs_Mbuti.MS_PS.allCHROM.snps.bi.clean.pruned.fam FRwgs_Mbuti.MS_PS.allCHROM.snps.bi.clean.pruned.new.pop > FRwgs_Mbuti.MS_PS.allCHROM.snps.bi.clean.pruned.fam.pop
+cat keep_list_for_admixt.adm | awk '{print $2}' | while read indID; do grep $indID FRwgs_Mbuti.MS_PS.allCHROM.snps.bi.clean.pruned.fam.pop | cut -d$'\t' -f2 >> FRwgs_Mbuti.MS_PS.allCHROM.snps.bi.clean.pruned.ADMIXTSUPER.pop; done
+cd
+
+#run ADMIXTURE
+./admixture/admixture_linux-1.3.0/admixture ~/FR_WGS/plink/plinkFiles/FRwgs_Mbuti.MS_PS.allCHROM.snps.bi.clean.pruned.ADMIXTSUPER.bed 3 --supervised -j8
+
+#plot ancestry pop across the departments of Brittany
+#FRwgs_Mbuti.MS_PS.IDs.pops is locally saved: /home/ialves/Dropbox/instDuThorax/MS_PS_PoBI_samples/Admixture
+cat FRwgs_Mbuti.MS_PS.IDs.pops | grep BRETAGNE | awk '{print $1}' | while read indID; do stringID=`echo $indID | sed 's/_/ /g'`; grep "$stringID" ../../samples/WGS_geography_isa | cut -d' ' -f3,10 >> depart_BRETAGNE.txt; done
+
+cat FRwgs_Mbuti.MS_PS.IDs.pops | awk '{print $1}' | while read indID; do subIndID=`echo $indID | sed 's/_/ /g' | cut -d$' ' -f1`; echo $subIndID; yesNO=`grep "$subIndID" depart_BRETAGNE.txt`; if [ -z "$yesNO" ]; then echo "Variable is empty"; echo "-" >> depart_allPop.pop; else echo "the ind is from Brittany"; echo $yesNO | cut -d$' ' -f2 >> depart_allPop.pop; fi; done
+
+```
+
+
+
+
+
+
+
+
+
+
+   

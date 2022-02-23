@@ -1,0 +1,735 @@
+---
+title: "aDNA_contamination"
+author: "Isabel Alves"
+date: "5/27/2020"
+output: html_document
+---
+
+# aDNA contamination estimates
+
+## Contamination estimates based on mtDNA using schmutzi
+
+This report describes how to perform contamination estimates for both mtDNA and X-chromosome (males) using schmutzi and ANGSD, respectively. BAM files are located in: /sandbox/shares/mages/GHOST/UPPSALA
+
+To estimate aDNA contamination from mtDNA and using schmutzi one needs to have BAM files containing only mtDNA reads. The recommended way to do so consists in mapping all the reads to the mitogenome and not to all the human reference. This way the number of reads mapping to the mtDNA will be larger and therefore will provide a better coverage of the mtDNA. The disadvantage of these procedures is that there will be a lot of false positive reads, ie reads that are from nuDNA but that map to the mtDNA. On the other hand, by mapping everything to the human reference and due to the differences in the DNA amount originating from nuDNA and from mtDNA, the mapping to the human reference creates large gaps (at least when using aDNA, confirm this for modern DNA). 
+
+The BAMs sent by UPPSALA are mapped to the human reference genome - hs37d5.fa - and it is hosted in: /sandbox/shares/mages/WGS_PREGO_Finistere_GAZEL/isabel/human_ref. 
+This causes a problem to the usage of schmutzi as the software assumes that the reads were mapped to the mitogenome. To overcome this issue some additional steps are required as indicated below.  
+
+Below are the steps required if the BAMs were generated as expected by schmutzi.
+
+```{bash eval=FALSE}
+
+module load samtools
+module load R
+
+#first one needs to sort the BAM files -m and -@ options specify the memory and nb of threads to use
+for bam in /sandbox/shares/mages/GHOST/UPPSALA/*.bam; do echo $bam; cp $bam /sandbox/shares/mages/WGS_PREGO_Finistere_GAZEL/isabel/FR_aDNA_medieval/BAMs; done
+
+for bam in /sandbox/shares/mages/WGS_PREGO_Finistere_GAZEL/isabel/FR_aDNA_medieval/BAMs/*.bam; do echo $bam; samtools index -b -@ 4 $bam;done
+
+#keep only mtDNA
+samtools view -o /sandbox/shares/mages/WGS_PREGO_Finistere_GAZEL/isabel/FR_aDNA_medieval/BAMs/fra001.MT.bam /sandbox/shares/mages/WGS_PREGO_Finistere_GAZEL/isabel/FR_aDNA_medieval/BAMs/fra001_90perc_final_20200325.merge.hs37d5.fa.bam MT
+
+#sort reads 
+samtools sort -m 8G -@ 4 -o /sandbox/shares/mages/WGS_PREGO_Finistere_GAZEL/isabel/FR_aDNA_medieval/BAMs/fra001.MT.sorted.bam /sandbox/shares/mages/WGS_PREGO_Finistere_GAZEL/isabel/FR_aDNA_medieval/BAMs/fra001.MT.bam
+
+#fill MD field
+samtools calmd -b -@ 4 /sandbox/shares/mages/WGS_PREGO_Finistere_GAZEL/isabel/FR_aDNA_medieval/BAMs/fra001.MT.sorted.bam /sandbox/shares/mages/WGS_PREGO_Finistere_GAZEL/isabel/human_ref/hs37d5.fa > /sandbox/shares/mages/WGS_PREGO_Finistere_GAZEL/isabel/FR_aDNA_medieval/BAMs/fra001.MT.sorted.calmd.bam
+
+#index 
+samtools index -b -@ 4 /sandbox/shares/mages/WGS_PREGO_Finistere_GAZEL/isabel/FR_aDNA_medieval/BAMs/fra001.MT.sorted.calmd.bam
+
+#to check the names of the regions in the BAM do:
+#samtools view -H /sandbox/shares/mages/WGS_PREGO_Finistere_GAZEL/isabel/FR_aDNA_medieval/BAMs/fra001.MT.sorted.calmd.bam | grep "@SQ"
+
+#index fasta to create *.fai
+samtools faidx /sandbox/shares/mages/WGS_PREGO_Finistere_GAZEL/isabel/human_ref/hs37d5.fa
+
+#creating output folder for schmutzi
+ mkdir mtCont_output
+/sandbox/users/alves-i/schmutzi/schmutzi/src/contDeam.pl  --library double --out mtCont_output/fra001 BAMs/fra001.MT.sorted.calmd.bam
+
+/sandbox/users/alves-i/schmutzi/schmutzi/src/schmutzi.pl --ref /sandbox/shares/mages/WGS_PREGO_Finistere_GAZEL/isabel/human_ref/hs37d5.fa mtCont_output/fra001 /sandbox/users/alves-i/schmutzi/schmutzi/share/schmutzi/alleleFreqMT/197/freqs/ BAMs/fra001.MT.sorted.calmd.bam
+
+```
+
+Below are the steps required if the BAMs were mapped to the human reference. Additional steps manipulating the header of the BAM are required in this case. 
+
+```{bash eval=FALSE}
+module load samtools
+module load R
+wrkDir="/sandbox/shares/mages/WGS_PREGO_Finistere_GAZEL/isabel/FR_aDNA_medieval/BAMs"
+
+##NOTE: the two command lines below do NOT need to be run if the original BAM files are already copied into
+## the working directoy and indexed.
+#first one needs to sort the BAM files -m and -@ options specify the memory and nb of threads to use
+for bam in /sandbox/shares/mages/GHOST/UPPSALA/*.bam; do echo $bam; cp $bam $wrkDir; done
+
+for bam in $wrkDir/*.bam; do echo $bam; samtools index -b -@ 4 $bam;done
+##-------
+
+originalBAMName="fra017-b1e1l1p1_Cutadapt-Flash_20200320.merged.hs37d5.fa.cons.90perc.bam"
+indTAG=`echo $originalBAMName | sed 's/\(\w\)[_-].*/\1/'`
+
+#keep only mtDNA
+samtools view -o $wrkDir/$indTAG.MT.bam $wrkDir/$originalBAMName MT
+
+#sort reads 
+samtools sort -m 8G -@ 4 -o $wrkDir/$indTAG.MT.sorted.bam $wrkDir/$indTAG.MT.bam
+
+cd $wrkDir
+
+#changing the header - REQUIRED TO RUN schmutzi
+samtools view -H $indTAG.MT.sorted.bam |awk '{if($1=="@SQ"){if($2=="SN:MT"){print $1"\tSN:mtref\t"$3} }else{print $0}}' > $indTAG.newheader.txt
+
+#generate a new BAM with the header created above - REQUIRED TO RUN schmutzi
+cat $indTAG.newheader.txt <(samtools view $indTAG.MT.sorted.bam |sed "s/\tMT\t/\tmtref\t/g") | samtools view -bS - > $indTAG.MT.newheader.bam
+
+#fill MD field
+samtools calmd $indTAG.MT.newheader.bam /sandbox/users/alves-i/schmutzi/schmutzi/share/schmutzi/refs/human_MT.fa |samtools view -bS - > $indTAG.MT.newheader.calmd.bam
+
+#index MD corrected file 
+samtools index -b -@ 4 $indTAG.MT.newheader.calmd.bam
+
+#creating output folder for schmutzi
+if [ ! -d "../mtCont_output" ]; 
+then
+mkdir ../mtCont_output
+fi
+
+/sandbox/users/alves-i/schmutzi/schmutzi/src/contDeam.pl --library double --out ../mtCont_output/$indTAG $indTAG.MT.newheader.calmd.bam
+
+/sandbox/users/alves-i/schmutzi/schmutzi/src/schmutzi.pl --ref /sandbox/users/alves-i/schmutzi/schmutzi/share/schmutzi/refs/human_MT.fa ../mtCont_output/$indTAG /sandbox/users/alves-i/schmutzi/schmutzi/share/schmutzi/alleleFreqMT/197/freqs/ $indTAG.MT.newheader.calmd.bam
+
+```
+
+
+
+## Contamination estimates based on the X-chromosome
+
+
+```{bash eval=FALSE}
+module load R
+
+samples=( "fra004_90perc_final_20200325.merge.hs37d5.fa.bam" "fra008-b1e1l1p1_Cutadapt-Flash_20200320.merged.hs37d5.fa.cons.90perc.bam" "fra009-b1e1l1p2_Cutadapt-Flash_20200320.merged.hs37d5.fa.cons.90perc.bam" "fra016-b1e1l1p1_Cutadapt-Flash_20200320.merged.hs37d5.fa.cons.90perc.bam" "fra017-b1e1l1p1_Cutadapt-Flash_20200320.merged.hs37d5.fa.cons.90perc.bam" )
+
+wrkDir="/sandbox/shares/mages/WGS_PREGO_Finistere_GAZEL/isabel/FR_aDNA_medieval/BAMs"
+cd $wrkDir
+
+for s in ${samples[@]}; 
+do 
+indTAG=`echo $s | sed 's/\(\w\)[_-].*/\1/'`
+echo "Analysing sample: $indTAG";
+~/angsd/angsd/angsd -i $wrkDir/$s -r X:5000000-154900000 -doCounts 1  -iCounts 1 -minMapQ 30 -minQ 20 -out $wrkDir/$indTAG > $wrkDir/$indTAG.angsd.out
+Rscript ~/angsd/angsd/R/contamination.R mapFile="/sandbox/users/alves-i/angsd/angsd/RES/chrX.unique.gz"  hapFile="/sandbox/users/alves-i/angsd/angsd/RES/HapMapChrX.gz" countFile="$wrkDir/$indTAG.icnts.gz" mc.cores=16 > $wrkDir/$indTAG.angsdRCont.out
+done
+
+```
+
+## Pseudo-haploid calling based on HOA SNP chip
+
+The original Reich's .snp file is located here: 
+/sandbox/shares/mages/WGS_PREGO_Finistere_GAZEL/isabel/REICH_march2020/ORIGINAL/v42.4.1240K_HO.snp
+
+
+
+```{bash eval=FALSE}
+
+module load samtools
+
+cd /sandbox/shares/mages/WGS_PREGO_Finistere_GAZEL/isabel/REICH_march2020/ORIGINAL/
+#extract column 2 and 4 containing chr 1:24
+cat v42.4.1240K_HO.snp | awk '{print $2, $4}' > col2_col4_fromOriFile.txt
+#extracting only from chr1:22
+for i in `seq 1 22`; do grep ^$i$" " col2_col4_fromOriFile.txt >> list_pos_extract.txt; done
+
+#specifying BAMs
+bams=( "fra001_90perc_final_20200325.merge.hs37d5.fa.bam" "fra004_90perc_final_20200325.merge.hs37d5.fa.bam" 
+"fra008-b1e1l1p1_Cutadapt-Flash_20200320.merged.hs37d5.fa.cons.90perc.bam" "fra009-b1e1l1p2_Cutadapt-Flash_20200320.merged.hs37d5.fa.cons.90perc.bam" "fra016-b1e1l1p1_Cutadapt-Flash_20200320.merged.hs37d5.fa.cons.90perc.bam" "fra017-b1e1l1p1_Cutadapt-Flash_20200320.merged.hs37d5.fa.cons.90perc.bam" )
+
+declare -a BAMFULLPATH
+for i in `seq 0 5`; do BAMFULLPATH[$i]="/sandbox/shares/mages/WGS_PREGO_Finistere_GAZEL/isabel/FR_aDNA_medieval/BAMs/${bams[$i]}"; echo ${BAMFULLPATH[$i]}; done
+
+mkdir ~/FR_WGS/FR_aDNA_medieval/calling_HOA
+#generating a pileup file according to pileupCaller instructions
+samtools mpileup -R -B -q30 -Q30 -l ~/FR_WGS/REICH_march2020/ORIGINAL/list_pos_extract.txt -f ~/FR_WGS/human_ref/hs37d5.fa ${BAMFULLPATH[*]} > ~/FR_WGS/FR_aDNA_medieval/calling_HOA/pileup.txt
+
+#generate a .snp file containing the autosomal snps listed in list_pos_extract.txt
+#this is required to call pileupCaller
+
+pileupCaller --randomHaploid --sampleNames fra001,fra004,fra008,fra009,fra016,fra017 --samplePopName FRMedieval -f /sandbox/shares/mages/WGS_PREGO_Finistere_GAZEL/isabel/REICH_march2020/ORIGINAL/auto.snp -e ~/FR_WGS/FR_aDNA_medieval/calling_HOA/fr_medieval < ~/FR_WGS/FR_aDNA_medieval/calling_HOA/pileup.txt
+
+```
+
+## Merging with EIG-6.1.4 
+
+The first step was to perform a PCA only with French samples. To do so, I kept from the merged dataset - fr_vk_1240kHO_full.bis.ind - only french samples, both our own samples and the french samples present in Reich's dataset using the poplistname file option in CONVERT. 
+
+The fr_vk_1240kHO_full.bis.ind is located in: /sandbox/shares/mages/WGS_PREGO_Finistere_GAZEL/isabel/REICH_march2020/SUBSET_finalPops
+
+```{bash eval=FALSE}
+
+#keep only FR samples from the full merged dataset : fr_vk_1240kHO_full.bis.ind. 
+popNames=( "FINISTERE" "MORBIHAN" "COTES-DARMOR" "ILLE-ET-VILAINE" "BASSE-NORMANDIE.HAUTE-NORMANDIE" "NORD-PAS-DE-CALAIS.PICARDIE" "ALSACE.LORRAINE" "CENTRE" "LOIRE-ATLANTIQUE" "SARTHE" "MAINE-ET-LOIRE" "MAYENNE" "VENDEE" "LIMOUSIN.POITOU-CHARENTES" "FranceUnknown" "French" )
+
+for p in ${popNames[@]}; do echo $p >> /sandbox/shares/mages/WGS_PREGO_Finistere_GAZEL/isabel/FR_aDNA_medieval/calling_HOA/mergeHOA/popList.conv.txt; done
+
+#extract French populations from the file fr_vk_1240kHO_full.bis.ind using CONVERT program within the EIG software package.
+dirFRHO="/sandbox/shares/mages/WGS_PREGO_Finistere_GAZEL/isabel/REICH_march2020/SUBSET_finalPops"
+inName="fr_vk_1240kHO_full"
+
+(
+echo "genotypename:     $dirFRHO/$inName.geno"
+echo "snpname:          $dirFRHO/$inName.snp"
+echo "indivname:        $dirFRHO/$inName.bis.ind"
+echo "outputformat:     EIGENSTRAT"     
+echo "genotypeoutname:  $dirFRHO/$inName.geno"
+echo "snpoutname:       $dirFRHO/$inName.snp"
+echo "indivoutname:     $dirFRHO/$inName.ind"
+echo "poplistname:      /sandbox/shares/mages/WGS_PREGO_Finistere_GAZEL/isabel/FR_aDNA_medieval/calling_HOA/mergeHOA/popList.conv.txt"
+) > $dirFRHO/convert.ExtractPops.par
+
+/sandbox/users/alves-i/EIG-6.1.4/bin/convertf -p $dirFRHO/convert.ExtractPops.par > $dirFRHO/convert.ExtractPops.par.log
+
+#merge EIGENSTRAT aDNA medieval samples with modern French populations, in-house generated or in Reich's dataset.
+
+#merging the three datasets
+dirREICH="/sandbox/shares/mages/WGS_PREGO_Finistere_GAZEL/isabel/REICH_march2020/SUBSET_finalPops"
+reichFile="fr_vk_1240kHO_full"
+
+diraDNA="/sandbox/shares/mages/WGS_PREGO_Finistere_GAZEL/isabel/FR_aDNA_medieval/calling_HOA"
+inName="fr_medieval"
+
+#replace dbSNP id to CHROM:POS in the .snp file 
+#cat $diraDNA/$inName.snp | while read line; do awk '{BEGIN { FS = " " }; {print $2":"$4,$2,$3,$4,$5,$6}' >> $diraDNA/$inName.bis.snp; done
+
+(
+echo "geno1:           $dirREICH/$reichFile.geno"     
+echo "snp1:            $dirREICH/$reichFile.snp"
+echo "ind1:            $dirREICH/$reichFile.bis.ind"
+echo "geno2:           $diraDNA/$inName.geno"
+echo "snp2:            $diraDNA/$inName.bis.bis.snp"
+echo "ind2:            $diraDNA/$inName.ind"
+echo "genooutfilename: $diraDNA/mergeHOA/fr_vk_1240kHO_full_sixMedieval.geno"
+echo "snpoutfilename:  $diraDNA/mergeHOA/fr_vk_1240kHO_full_sixMedieval.snp"
+echo "indoutfilename:  $diraDNA/mergeHOA/fr_vk_1240kHO_full_sixMedieval.ind"
+echo "outputformat:    EIGENSTRAT"
+echo "docheck: YES"
+echo "strandcheck: YES"
+) > $diraDNA/mergeHOA/input.MERGEIT.aDNA.par
+
+/sandbox/users/alves-i/EIG-6.1.4/bin/mergeit -p $diraDNA/mergeHOA/input.MERGEIT.aDNA.par > $diraDNA/mergeHOA/input.MERGEIT.aDNA.par.log
+
+``` 
+
+## PCA with the french medieval samples and all modern samples from fr_vk_1240kHO
+
+```{bash eval=FALSE}
+
+mkdir $diraDNA/mergeHOA/pca
+diraDNA="/sandbox/shares/mages/WGS_PREGO_Finistere_GAZEL/isabel/FR_aDNA_medieval/calling_HOA"
+
+(
+echo "genotypename:  $diraDNA/mergeHOA/fr_vk_1240kHO_sixMedieval.geno"
+echo "snpname:       $diraDNA/mergeHOA/fr_vk_1240kHO_sixMedieval.snp"
+echo "indivname:     $diraDNA/mergeHOA/fr_vk_1240kHO_sixMedieval.ind"
+echo "evecoutname:   $diraDNA/mergeHOA/pca/WGS.evec"
+echo "evaloutname:   $diraDNA/mergeHOA/pca/WGS.eval"
+echo "deletesnpoutname: EIG_removed_SNPs"
+echo "numoutevec: 10"
+echo "killr2: YES"
+echo "r2thresh: 0.50"
+echo "r2physlim: 1000000"
+echo "outliermode: 2" 
+echo "lsqproject:  YES"
+echo "poplistname:  $diraDNA/mergeHOA/popList.conv.txt"
+
+) > $diraDNA/mergeHOA/pca/smartPCA_aDNAMedieval_FR.par
+
+EIG-6.1.4/bin/smartpca -p $diraDNA/mergeHOA/pca/smartPCA_aDNAMedieval_FR.par > $diraDNA/mergeHOA/pca/smartPCA_aDNAMedieval_FR.log
+
+#outlier removal - french individuals from HOA are outliers
+(
+echo "genotypename:  $diraDNA/mergeHOA/fr_vk_1240kHO_sixMedieval.geno"
+echo "snpname:       $diraDNA/mergeHOA/fr_vk_1240kHO_sixMedieval.snp"
+echo "indivname:     $diraDNA/mergeHOA/fr_vk_1240kHO_sixMedieval.ind"
+echo "evecoutname:   $diraDNA/mergeHOA/pca/WGS.evec"
+echo "evaloutname:   $diraDNA/mergeHOA/pca/WGS.eval"
+echo "deletesnpoutname: EIG_removed_SNPs"
+echo "numoutevec: 10"
+echo "killr2: YES"
+echo "r2thresh: 0.50"
+echo "r2physlim: 1000000"
+echo "lsqproject:  YES"
+echo "poplistname:  $diraDNA/mergeHOA/popList.conv.txt"
+
+) > $diraDNA/mergeHOA/pca/smartPCA_aDNAMedieval_FR_outlierRemoval.par
+
+EIG-6.1.4/bin/smartpca -p $diraDNA/mergeHOA/pca/smartPCA_aDNAMedieval_FR_outlierRemoval.par > $diraDNA/mergeHOA/pca/smartPCA_aDNAMedieval_FR_outlierRemoval.log
+
+
+#PCA with the HOA subset used before with outlier removal - french individuals from HOA are outliers
+(
+echo "genotypename:  $diraDNA/mergeHOA/fr_vk_1240kHO_full_sixMedieval.geno"
+echo "snpname:       $diraDNA/mergeHOA/fr_vk_1240kHO_full_sixMedieval.snp"
+echo "indivname:     $diraDNA/mergeHOA/fr_vk_1240kHO_full_sixMedieval.ind"
+echo "evecoutname:   $diraDNA/mergeHOA/pca/WGS.evec"
+echo "evaloutname:   $diraDNA/mergeHOA/pca/WGS.eval"
+echo "deletesnpoutname: EIG_removed_SNPs"
+echo "numoutevec: 10"
+echo "killr2: YES"
+echo "r2thresh: 0.50"
+echo "r2physlim: 1000000"
+echo "lsqproject:  YES"
+echo "poplistname:  $diraDNA/mergeHOA/popList.conv.txt"
+
+) > $diraDNA/mergeHOA/pca/smartPCA_aDNAMedieval_FR_outlierRemoval.par
+
+EIG-6.1.4/bin/smartpca -p $diraDNA/mergeHOA/pca/smartPCA_aDNAMedieval_FR_outlierRemoval.par > $diraDNA/mergeHOA/pca/smartPCA_aDNAMedieval_FR_outlierRemoval.log
+
+```
+
+## PCA with the french medieval samples and all modern samples from fr_vk_1240kHO
+
+First, I extracted modern Europeans and FR medieval from the file:
+
+/sandbox/users/alves-i/FR_WGS/FR_aDNA_medieval/calling_HOA/mergeHOA/fr_vk_1240kHO_full_sixMedieval.*
+
+The list of populations is stored locally:
+
+/home/ialves/Dropbox/instDuThorax/aDNA_medieval/pseudoHap_HOA_calling/pca/allModernEuropeans_plusFRMedieval.txt
+
+```{bash eval=FALSE}
+cat fr_vk_1240kHO_full_sixMedieval.ind | awk '{print $3}' | sort | uniq -c
+
+#locally
+scp allModernEuropeans_plusFRMedieval.txt alves-i@bird2login.univ-nantes.fr:/sandbox/shares/mages/WGS_PREGO_Finistere_GAZEL/isabel/FR_aDNA_medieval/calling_HOA/mergeHOA/
+
+#extract samples contained in allModernEuropeans_plusFRMedieval.txt
+
+#extract French populations from the file fr_vk_1240kHO_full.bis.ind using CONVERT program within the EIG software package.
+dirFRHO="/sandbox/shares/mages/WGS_PREGO_Finistere_GAZEL/isabel/FR_aDNA_medieval/calling_HOA/mergeHOA"
+inName="fr_vk_1240kHO_full_sixMedieval"
+
+(
+echo "genotypename:     $dirFRHO/$inName.geno"
+echo "snpname:          $dirFRHO/$inName.snp"
+echo "indivname:        $dirFRHO/$inName.ind"
+echo "outputformat:     EIGENSTRAT"     
+echo "genotypeoutname:  $dirFRHO/mFR_mEuropeans_sixMedieval.geno"
+echo "snpoutname:       $dirFRHO/mFR_mEuropeans_sixMedieval.snp"
+echo "indivoutname:     $dirFRHO/mFR_mEuropeans_sixMedieval.ind"
+echo "poplistname:      $dirFRHO/allModernEuropeans_plusFRMedieval.txt"
+) > $dirFRHO/convert.ExtractPops.medieval.par
+
+/sandbox/users/alves-i/EIG-6.1.4/bin/convertf -p $dirFRHO/convert.ExtractPops.medieval.par > $dirFRHO/convert.ExtractPops.medieval.log
+
+#pca to detect outliers 
+
+#create a list of modern populations, ie remove medieval french from allModernEuropeans_plusFRMedieval.txt
+cd $dirFRHO
+cat allModernEuropeans_plusFRMedieval.txt | grep -v Medieval > onlyModernEuropeans.txt
+mkdir pca/onlyMEur/
+cd 
+
+(
+echo "genotypename:  $dirFRHO/mFR_mEuropeans_sixMedieval.geno"
+echo "snpname:       $dirFRHO/mFR_mEuropeans_sixMedieval.snp"
+echo "indivname:     $dirFRHO/mFR_mEuropeans_sixMedieval.ind"
+echo "evecoutname:   $dirFRHO/pca/onlyMEur/WGS.evec"
+echo "evaloutname:   $dirFRHO/pca/onlyMEur/WGS.eval"
+echo "deletesnpoutname: EIG_removed_SNPs"
+echo "numoutevec: 10"
+echo "killr2: YES"
+echo "r2thresh: 0.50"
+echo "r2physlim: 1000000"
+echo "lsqproject:  YES"
+echo "poplistname:  $dirFRHO/onlyModernEuropeans.txt"
+
+) > $dirFRHO/pca/onlyMEur/smartPCA_mEur_mFr_sixMedieval.par
+
+EIG-6.1.4/bin/smartpca -p $dirFRHO/pca/onlyMEur/smartPCA_mEur_mFr_sixMedieval.par > $dirFRHO/pca/onlyMEur/smartPCA_mEur_mFr_sixMedieval.log
+
+```
+
+#plotting PCA with all modern Europeans from the HOA plus the modern French samples 
+
+```{r echo=TRUE}
+folderName <- "/home/ialves/Dropbox/instDuThorax/aDNA_medieval/pseudoHap_HOA_calling/pca/onlyModEur_plusSixFRMedieval"
+
+setwd(folderName)
+
+FRPOPS=c("FINISTERE", "COTES-DARMOR", "MORBIHAN", "ILLE-ET-VILAINE",  "BASSE-NORMANDIE.HAUTE-NORMANDIE", "NORD-PAS-DE-CALAIS.PICARDIE", "ALSACE.LORRAINE", "VENDEE", "CENTRE", "LIMOUSIN.POITOU-CHARENTES")
+
+publishNameFR <- c("FINISTERE", "COTES-DARMOR", "MORBIHAN", "ILLE-ET-VILAINE",  "NORMANDIE", "HAUTES-DE-FRANCE", "GRAND-EST", "VENDEE", "CENTRE", "NOUVELLE-AQUITAINE")
+
+pca_loads <- read.table(paste0(folderName, "/WGS.evec"), header = F, sep = "", skip = 1)
+colnames(pca_loads) <- c("Sample_ID", paste("PC", 1:10, sep = "_"), "Region")
+
+############
+##
+## individual labels
+##
+############
+pca_loads <- pca_loads[which(pca_loads$Region != "FranceUnknown"),]
+indLabels_PCA <- pca_loads[which(pca_loads$Region != "FranceUnknown"),1]
+
+
+############
+##
+## Opening eigenvalues
+##
+############
+
+eigenVal <- scan(file=paste0(folderName, "/WGS.eval"), what = as.numeric())[-1]
+
+############
+##
+## Set colors
+##
+############
+allPops <- as.character(unique(pca_loads$Region))
+acronyms <- c("FIN", "MOR", "COT", "ILL", "NOR", "HAU", "GRA", "CEN", "LOI", "SAR", "MAI", "MAY", "VEN", "NOU", "Fre", "", "", 
+              "Bas", "Eng", "Gre", "Hun", "Ice", "Norw", "Orc", "Sar", "Sco", "Sic", "Spa", "SpaN")
+popNames=c("FINISTERE","MORBIHAN", "COTES-DARMOR", "ILLE-ET-VILAINE", "BASSE-NORMANDIE.HAUTE-NORMANDIE", "NORD-PAS-DE-CALAIS.PICARDIE",
+           "ALSACE.LORRAINE", "CENTRE", "LOIRE-ATLANTIQUE", "SARTHE", "MAINE-ET-LOIRE", "MAYENNE", "VENDEE", "LIMOUSIN.POITOU-CHARENTES",
+           "French", "FRMedieval", "FRMedieval_outlier", "Basque", "English", "Greek", "Hungarian", "Icelandic",
+           "Norwegian", "Orcadian", "Sardinian", "Scottish", "Sicilian", "Spanish", "Spanish_North")
+
+#display.brewer.pal()
+colors_reg <- c("lemonchiffon4", "lemonchiffon4", "lemonchiffon4", "lemonchiffon4", "#abdda4", "lightseagreen","steelblue4",  "#fee08b",  "khaki3", "khaki3",  "khaki3", "khaki3", "khaki3","orange3", "grey70","red", "red", rep("grey70", 15))
+# alpha(c(brewer.pal(length(acronyms)-9, "Paired"),"black"), 0.3)
+pch_reg <- ""
+col_v <- rep(0, nrow(pca_loads))
+popLabels_v <- rep(0, nrow(pca_loads))
+for (pop in 1:length(popNames)) {
+
+  print(paste("Coloring population: ", popNames[pop], sep = ""))
+  print(paste("nb of individual in the pop: ", length(which(pca_loads$Region == popNames[pop])), sep = ""))
+  col_v[which(pca_loads$Region == popNames[pop])] <- colors_reg[pop]
+  popLabels_v[which(pca_loads$Region == popNames[pop])] <- acronyms[pop]
+}
+#Setting up legend: only regions
+regions <- c("Bretagne", "Normandie", "Hauts de France", "Grand Est", "Centre", "Pays-de-la-Loire", "Nouvelle Aquitaine", "Published_FR", "aDNA Medieval")
+colLeg <- c("lemonchiffon4", "#abdda4", "lightseagreen","steelblue4",  "#fee08b",  "khaki3", "orange3", "grey70","red")
+
+z <- layout(matrix(c(1,2,3), ncol = 3), widths=c(3,3,2))
+#layout.show(z)
+par(mar=c(4,4,1,1))
+    plot(pca_loads[which(pca_loads$Region != "FRMedieval" | pca_loads$Region != "FRMedieval_outlier"),2], pca_loads[which(pca_loads$Region != "FRMedieval" | pca_loads$Region != "FRMedieval_outlier"),3], pch="", 
+         xlab=paste0("PC1 (", round((eigenVal[1]/sum(eigenVal))*100, digits = 3), "%)"), ylab = paste0("PC2 (",      round((eigenVal[2]/sum(eigenVal))*100, digits = 3), "%)"), xlim=c(min(pca_loads[,2])-0.02,max(pca_loads[,2])+0.02), #c(min(pca_loads[,2])-0.02,max(pca_loads[,2])+0.02)
+         ylim = c(min(pca_loads[,3])-0.02,max(pca_loads[,3])+0.02), cex=1.8, cex.axis=1.2, cex.lab=1.2) #      ylim = c(min(pca_loads[,3])-0.02,max(pca_loads[,3])+0.02)
+    
+    text(x=pca_loads[which(pca_loads$Region != "FRMedieval" | pca_loads$Region != "FRMedieval_outlier"),2], y=pca_loads[which(pca_loads$Region != "FRMedieval" | pca_loads$Region != "FRMedieval_outlier"),3], labels=popLabels_v[which(pca_loads$Region != "FRMedieval" | pca_loads$Region != "FRMedieval_outlier")], cex=1.2, pos = 2, col = col_v[which(pca_loads$Region != "FRMedieval" | pca_loads$Region != "FRMedieval_outlier")])
+    text(x=pca_loads[which(pca_loads$Region == "FRMedieval" | pca_loads$Region == "FRMedieval_outlier"),2], y=pca_loads[which(pca_loads$Region == "FRMedieval" | pca_loads$Region == "FRMedieval_outliear"),3], 
+         labels = pca_loads$Sample_ID[which(pca_loads$Region == "FRMedieval" | pca_loads$Region == "FRMedieval_outlier")], cex=1.2, pos = 2, col = "red")
+```
+
+## Merge Medieval ancient samples with REICH's dataset but containing also eastern Europeans, Middle Easterns and North Africans
+
+Both PCA plots generated with only French samples and western European samples showed that samples fra009 is an outlier suggesting that could represent a migrant individual (as its contamination and calling summary statistics do show indicate low quality sample). Therefore, I had to broden the samples extracted from Reich's dataset with respect to geographic coverage. I extracted all the samples reported in the aDNA_REICHmarch2020_FRWGS together with the following samples:
+
+Ukrainian
+Turkish
+Tunisian
+Syrian
+Saudi
+Russian
+Romanian
+Palestinian
+Ossetian
+Mozabite
+Moroccan
+Maltese
+Lithuanian
+Lebanese
+Kurd
+Kalash
+Jordanian
+Jew_Ashkenazi
+Jew_Cochin
+Jew_Georgian
+Jew_Iranian
+Jew_Iraqi
+Jew_Libyan
+Jew_Moroccan
+Jew_Tunisian
+Jew_Turkish
+Jew_Yemenite
+Iranian
+Georgian
+Finnish
+Estonian
+Egyptian
+Druze
+Czech
+Cypriot
+Chuvash
+Bulgarian
+Belarusian
+BedouinA
+BedouinB
+Assyrian
+Armenian
+Algerian
+Albanian
+Adygei
+
+By adding the samples shown above to the final.pops.unique.txt I created a file:
+
+final.pops.unique.EastEur.NorthAfr.MiddleEast.txt
+
+located in:
+
+/sandbox/shares/mages/WGS_PREGO_Finistere_GAZEL/isabel/REICH_march2020
+
+
+Below are the steps to extract all the samples from the original v42.4.1240K_HO.* dataset. 
+
+
+
+
+```{bash eval=FALSE}
+#Extract aDNA and HumanOrigin samples 
+
+wrkDir="/sandbox/shares/mages/WGS_PREGO_Finistere_GAZEL/isabel/REICH_march2020"
+inFname="v42.4.1240K_HO"
+outFname="wEUR_eEUR_MidEast_NAfr_ReichMarch2020"
+
+(
+echo "genotypename:    $wrkDir/ORIGINAL/$inFname.geno"   
+echo "snpname:         $wrkDir/ORIGINAL/$inFname.snp"
+echo "indivname:       $wrkDir/ORIGINAL/$inFname.ind"
+echo "outputformat:    EIGENSTRAT"
+echo "genotypeoutname: $wrkDir/SUBSET_finalPops/$outFname.geno"
+echo "snpoutname:      $wrkDir/SUBSET_finalPops/$outFname.snp"
+echo "indivoutname:    $wrkDir/SUBSET_finalPops/$outFname.ind"
+echo "familynames:     NO"
+echo "poplistname:     $wrkDir/final.pops.unique.EastEur.NorthAfr.MiddleEast.txt"
+) > $wrkDir/convert.extractFrom1240KHO.par
+
+/sandbox/users/alves-i/EIG-6.1.4/bin/convertf -p $wrkDir/convert.extractFrom1240KHO.par > $wrkDir/convert.extractFrom1240KHO.log
+
+#changing SNP ids in REICH dataset. 
+mv $wrkDir/SUBSET_finalPops/$outFname.snp $wrkDir/SUBSET_finalPops/$outFname.rs.snp
+
+cd $wrkDir
+cat SUBSET_finalPops/$outFname.rs.snp | awk '{OFS=" "; print $2":"$4,$2,$3,$4,$5,$6}' >> SUBSET_finalPops/$outFname.snp
+
+#generate a new .ind file with France lables
+wrDir="/sandbox/shares/mages/WGS_PREGO_Finistere_GAZEL/isabel/REICH_march2020/FR_WGS_HO_SNPs"
+cd $wrDir
+
+cat fr_vk_1240kHO.ind | while read line; do 
+popL=`echo $line | awk '{print $3}'`; 
+indID=`echo $line | awk '{print $1}'`
+if [[ "$popL" == "Control" ]]; then
+frSamples=`grep $indID /sandbox/users/alves-i/FR_WGS/REICH_march2020/FR_WGS_HO_SNPs/FRANCE.allSamples.pop`
+popLabel=`echo $frSamples | awk '{print $2}'`
+if [ ! -z "$frSamples" ]; then
+echo "$indID U $popLabel" >> fr_vk_1240kHO.bis.ind;
+else 
+echo "$indID U FranceUnknown" >> fr_vk_1240kHO.bis.ind;
+fi
+else
+echo $line >> fr_vk_1240kHO.bis.ind;
+fi
+done
+
+#merging the frWGS and the subset of REICH's dataset generated above
+dirFRHO="/sandbox/shares/mages/WGS_PREGO_Finistere_GAZEL/isabel/REICH_march2020/FR_WGS_HO_SNPs"
+inName="fr_vk_1240kHO"
+
+(
+echo "geno1:           $wrkDir/SUBSET_finalPops/$outFname.geno"
+echo "snp1:            $wrkDir/SUBSET_finalPops/$outFname.snp"
+echo "ind1:            $wrkDir/SUBSET_finalPops/$outFname.ind"
+echo "geno2:           $dirFRHO/$inName.geno"     
+echo "snp2:            $dirFRHO/$inName.snp"
+echo "ind2:            $dirFRHO/$inName.bis.ind"
+echo "genooutfilename: $wrkDir/SUBSET_finalPops/frWGS_wEUR_eEUR_MidEast_NAfr_ReichMarch2020.geno"
+echo "snpoutfilename:  $wrkDir/SUBSET_finalPops/frWGS_wEUR_eEUR_MidEast_NAfr_ReichMarch2020.snp"
+echo "indoutfilename:  $wrkDir/SUBSET_finalPops/frWGS_wEUR_eEUR_MidEast_NAfr_ReichMarch2020.ind"
+echo "outputformat:    EIGENSTRAT"
+echo "docheck: YES"
+echo "strandcheck: YES"
+) > $wrkDir/input.MERGEIT.frWGS.REICH.July.par
+
+/sandbox/users/alves-i/EIG-6.1.4/bin/mergeit -p $wrkDir/input.MERGEIT.frWGS.REICH.July.par > $wrkDir/input.MERGEIT.frWGS.REICH.July.log
+
+#merge with the medieval samples
+
+#merging the three datasets
+dirREICH="/sandbox/shares/mages/WGS_PREGO_Finistere_GAZEL/isabel/REICH_march2020/SUBSET_finalPops"
+reichFile="frWGS_wEUR_eEUR_MidEast_NAfr_ReichMarch2020"
+
+diraDNA="/sandbox/shares/mages/WGS_PREGO_Finistere_GAZEL/isabel/FR_aDNA_medieval/calling_HOA"
+inName="fr_medieval"
+
+#replace dbSNP id to CHROM:POS in the .snp file 
+#cat $diraDNA/$inName.snp | while read line; do awk '{BEGIN { FS = " " }; {print $2":"$4,$2,$3,$4,$5,$6}' >> $diraDNA/$inName.bis.snp; done
+
+(
+echo "geno1:           $dirREICH/$reichFile.geno"     
+echo "snp1:            $dirREICH/$reichFile.snp"
+echo "ind1:            $dirREICH/$reichFile.ind"
+echo "geno2:           $diraDNA/$inName.geno"
+echo "snp2:            $diraDNA/$inName.bis.bis.snp"
+echo "ind2:            $diraDNA/$inName.ind"
+echo "genooutfilename: $diraDNA/mergeHOA/frWGS_wEUR_eEUR_MidEast_NAfr_ReichMarch2020_sixMedieval.geno"
+echo "snpoutfilename:  $diraDNA/mergeHOA/frWGS_wEUR_eEUR_MidEast_NAfr_ReichMarch2020_sixMedieval.snp"
+echo "indoutfilename:  $diraDNA/mergeHOA/frWGS_wEUR_eEUR_MidEast_NAfr_ReichMarch2020_sixMedieval.ind"
+echo "outputformat:    EIGENSTRAT"
+echo "docheck: YES"
+echo "strandcheck: YES"
+) > $diraDNA/mergeHOA/input.MERGEIT.aDNA.par
+
+/sandbox/users/alves-i/EIG-6.1.4/bin/mergeit -p $diraDNA/mergeHOA/input.MERGEIT.aDNA.par > $diraDNA/mergeHOA/input.MERGEIT.aDNA.par.log
+
+###
+### preparing the data to perform PCA
+###
+cd $diraDNA
+cat mergeHOA/frWGS_wEUR_eEUR_MidEast_NAfr_ReichMarch2020_sixMedieval.ind | awk '{print $3}' | sort | uniq -c > mergeHOA/allModernEuropeans_plusFRMedieval.txt
+
+#extract French populations from the file fr_vk_1240kHO_full.bis.ind using CONVERT program within the EIG software package.
+dirFRHO="/sandbox/shares/mages/WGS_PREGO_Finistere_GAZEL/isabel/FR_aDNA_medieval/calling_HOA/mergeHOA"
+inName="frWGS_wEUR_eEUR_MidEast_NAfr_ReichMarch2020_sixMedieval"
+
+(
+echo "genotypename:     $dirFRHO/$inName.geno"
+echo "snpname:          $dirFRHO/$inName.snp"
+echo "indivname:        $dirFRHO/$inName.ind"
+echo "outputformat:     EIGENSTRAT"     
+echo "genotypeoutname:  $dirFRHO/mFR_mEur_mMiddEast_MNAfr_sixMedieval.geno"
+echo "snpoutname:       $dirFRHO/mFR_mEur_mMiddEast_MNAfr_sixMedieval.snp"
+echo "indivoutname:     $dirFRHO/mFR_mEur_mMiddEast_MNAfr_sixMedieval.ind"
+echo "poplistname:      $dirFRHO/allModernEuropeans_plusFRMedieval.txt"
+) > $dirFRHO/convert.ExtractPops.medieval.par
+
+/sandbox/users/alves-i/EIG-6.1.4/bin/convertf -p $dirFRHO/convert.ExtractPops.medieval.par > $dirFRHO/convert.ExtractPops.medieval.log
+
+#pca to detect outliers 
+
+#create a list of modern populations, ie remove medieval french from allModernEuropeans_plusFRMedieval.txt
+cd $dirFRHO
+cat allModernEuropeans_plusFRMedieval.txt | grep -v Medieval > onlyModernEuropeans.txt
+mkdir pca/onlyMEur_MMidEast_MAfr/
+cd 
+
+(
+echo "genotypename:  $dirFRHO/mFR_mEur_mMiddEast_MNAfr_sixMedieval.geno"
+echo "snpname:       $dirFRHO/mFR_mEur_mMiddEast_MNAfr_sixMedieval.snp"
+echo "indivname:     $dirFRHO/mFR_mEur_mMiddEast_MNAfr_sixMedieval.ind"
+echo "evecoutname:   $dirFRHO/pca/onlyMEur_MMidEast_MAfr/WGS.evec"
+echo "evaloutname:   $dirFRHO/pca/onlyMEur_MMidEast_MAfr/WGS.eval"
+echo "deletesnpoutname: EIG_removed_SNPs"
+echo "numoutevec: 10"
+echo "killr2: YES"
+echo "r2thresh: 0.50"
+echo "r2physlim: 1000000"
+echo "lsqproject:  YES"
+echo "poplistname:  $dirFRHO/onlyModernEuropeans.txt"
+
+) > $dirFRHO/pca/onlyMEur_MMidEast_MAfr/smartPCA_mEur_mFr_sixMedieval.par
+
+EIG-6.1.4/bin/smartpca -p $dirFRHO/pca/onlyMEur_MMidEast_MAfr/smartPCA_mEur_mFr_sixMedieval.par > $dirFRHO/pca/onlyMEur_MMidEast_MAfr/smartPCA_mEur_mFr_sixMedieval.log
+
+
+```
+Below is the code to plot the smartPCA results. 
+
+```{r echo=TRUE}
+require(stringr)
+#function to get pop label acronyms
+retrieve_acronym <- function(z) {
+  if(str_detect(z, "_")) {
+    locUnderScore <- unique(str_locate(z, "_"))
+    newTag <- paste0(substr(z,1,3), substr(z,locUnderScore+1,locUnderScore+4))
+  } else {
+     newTag <- substr(z,1,4)
+  }
+  return(newTag)
+}
+##############
+##----------
+#----
+
+folderName <- "/home/ialves/Dropbox/instDuThorax/aDNA_medieval/pseudoHap_HOA_calling/pca/onlyMEur_MMidEast_MAfr"
+
+setwd(folderName)
+
+FRPOPS=c("FINISTERE", "COTES-DARMOR", "MORBIHAN", "ILLE-ET-VILAINE",  "BASSE-NORMANDIE.HAUTE-NORMANDIE", "NORD-PAS-DE-CALAIS.PICARDIE", "ALSACE.LORRAINE", "VENDEE", "CENTRE", "LIMOUSIN.POITOU-CHARENTES")
+
+publishNameFR <- c("FINISTERE", "COTES-DARMOR", "MORBIHAN", "ILLE-ET-VILAINE",  "NORMANDIE", "HAUTES-DE-FRANCE", "GRAND-EST", "VENDEE", "CENTRE", "NOUVELLE-AQUITAINE")
+
+pca_loads <- read.table(paste0(folderName, "/WGS.evec"), header = F, sep = "", skip = 1)
+colnames(pca_loads) <- c("Sample_ID", paste("PC", 1:10, sep = "_"), "Region")
+
+############
+##
+## individual labels
+##
+############
+pca_loads <- pca_loads[which(pca_loads$Region != "FranceUnknown"),]
+indLabels_PCA <- pca_loads[which(pca_loads$Region != "FranceUnknown"),1]
+
+
+############
+##
+## Opening eigenvalues
+##
+############
+
+eigenVal <- scan(file=paste0(folderName, "/WGS.eval"), what = as.numeric())[-1]
+
+############
+##
+## Set colors
+##
+############
+allPops <- as.character(unique(pca_loads$Region))
+
+popNames=c("FINISTERE","MORBIHAN", "COTES-DARMOR", "ILLE-ET-VILAINE", "BASSE-NORMANDIE.HAUTE-NORMANDIE", "NORD-PAS-DE-CALAIS.PICARDIE", "ALSACE.LORRAINE", "CENTRE", "LOIRE-ATLANTIQUE", "SARTHE", "MAINE-ET-LOIRE", "MAYENNE", "VENDEE", "LIMOUSIN.POITOU-CHARENTES", "FRMedieval", "French", sort(c("Adygei", "Georgian", "Kurd", "Ossetian", "Russian", "Chuvash", "Ukrainian", "Kalash", "Druze", "BedouinB", "BedouinA", "Sardinian", "Palestinian", "Orcadian", "Italian_North", "Basque",  "Bulgarian", "Hungarian", "Lithuanian","Iranian", "Syrian", "Lebanese", "Jordanian", "Saudi", "Egyptian", "Armenian", "Belarusian", "Estonian", "Czech", "Icelandic", "Greek", "Scottish", "English", "Spanish", "Spanish_North", "Finnish", "Jew_Libyan", "Maltese", "Jew_Ashkenazi", "Jew_Turkish", "Norwegian", "Jew_Tunisian", "Sicilian", "Italian_South", "Jew_Yemenite", "Turkish", "Jew_Iranian", "Albanian", "Jew_Cochin", "Jew_Iraqi", "Cypriot", "Jew_Moroccan", "Jew_Georgian", "Romanian", "Assyrian", "Mozabite", "Tunisian", "Algerian", "Moroccan")))
+
+acronyms <- c("FIN", "MOR", "COT", "ILL", "NOR", "HAU", "GRA", "CEN", "LOI", "SAR", "MAI", "MAY", "VEN", "NOU", "", "Fren", sapply(popNames[17:length(popNames)], FUN=retrieve_acronym))
+
+
+#display.brewer.pal()
+colors_reg <- c("lemonchiffon4", "lemonchiffon4", "lemonchiffon4", "lemonchiffon4", "#abdda4", "lightseagreen","steelblue4",  "#fee08b",  "khaki3", "khaki3",  "khaki3", "khaki3", "khaki3","orange3", "red", "grey70", rep("grey70", length(popNames[17:length(popNames)])))
+# alpha(c(brewer.pal(length(acronyms)-9, "Paired"),"black"), 0.3)
+pch_reg <- ""
+col_v <- rep(0, nrow(pca_loads))
+popLabels_v <- rep(0, nrow(pca_loads))
+for (pop in 1:length(popNames)) {
+
+  print(paste("Coloring population: ", popNames[pop], sep = ""))
+  print(paste("nb of individual in the pop: ", length(which(pca_loads$Region == popNames[pop])), sep = ""))
+  col_v[which(pca_loads$Region == popNames[pop])] <- colors_reg[pop]
+  popLabels_v[which(pca_loads$Region == popNames[pop])] <- acronyms[pop]
+}
+#Setting up legend: only regions
+regions <- c("Bretagne", "Normandie", "Hauts de France", "Grand Est", "Centre", "Pays-de-la-Loire", "Nouvelle Aquitaine", "Published_FR", "aDNA Medieval")
+colLeg <- c("lemonchiffon4", "#abdda4", "lightseagreen","steelblue4",  "#fee08b",  "khaki3", "orange3", "grey70","red")
+
+png(filename = paste0(folderName,"/aDNA_samples_PCA_mWeur_mEeur_mMidEast_mNAfr_withOutliers.png"), units = 'in', res = 300, height = 6, width = 6)
+par(mar=c(4,4,1,1))
+    plot(pca_loads[which(pca_loads$Region != "FRMedieval"),2], pca_loads[which(pca_loads$Region != "FRMedieval"),3], pch="", 
+         xlab=paste0("PC1 (", round((eigenVal[1]/sum(eigenVal))*100, digits = 3), "%)"), ylab = paste0("PC2 (",      round((eigenVal[2]/sum(eigenVal))*100, digits = 3), "%)"), xlim=c(min(pca_loads[,2])-0.02,max(pca_loads[,2])+0.02), #c(min(pca_loads[,2])-0.02,max(pca_loads[,2])+0.02)
+         ylim = c(min(pca_loads[,3])-0.02,max(pca_loads[,3])+0.02), cex=1.8, cex.axis=1.2, cex.lab=1.2) #      ylim = c(min(pca_loads[,3])-0.02,max(pca_loads[,3])+0.02)
+    
+    text(x=pca_loads[which(pca_loads$Region != "FRMedieval"),2], y=pca_loads[which(pca_loads$Region != "FRMedieval"),3], labels=popLabels_v[which(pca_loads$Region != "FRMedieval")], cex=1.2, pos = 2, col = col_v[which(pca_loads$Region != "FRMedieval")])
+    text(x=pca_loads[which(pca_loads$Region == "FRMedieval"),2], y=pca_loads[which(pca_loads$Region == "FRMedieval"),3], 
+         labels = pca_loads$Sample_ID[which(pca_loads$Region == "FRMedieval")], cex=1.2, pos = 2, col = "red")
+    
+dev.off()    
+```
+
+
+
+
+
+
+
+

@@ -1,0 +1,123 @@
+---
+title: "aDNA_medieval"
+author: "Isabel Alves"
+date: "2/17/2020"
+output: html_document
+---
+
+## Brief description
+This report describes the steps required to produce a PCA with smartpca on the set of SNPs resulting from merging MS and PS datasets together with the FR WGS. 
+
+The files can be found in: "/sandbox/users/alves-i/FR_WGS/plink/plinkFiles"
+The name of the file is: FRwgs_Mbuti.MS_PS.allCHROM.snps.bi.clean.bed/.bim/.fam
+
+The aDNA samples were called for 447,914 SNPs. Sites not at all called (missing) across the aDNA samples were not included in the aDNA .bcf file: /sandbox/shares/mages/20200214.calling.adna.isa.merged.bcf
+To prepare the files to transform in .geno/.ind/.snp to perform a PCA with smartPCA one needs to:
+
+1) get the list of SNPs common across the file with aDNA samples and the FRwgs
+2) convert the .bcf file into plink format to avoid complications (this was done with the extra command: --allow-extra-chr) with chrIDs
+3) Merge aDNA plink files with the FRwgs plink files (NOTE: Some sites were found to be tri-allelic)
+4) Remove tri-allelic sites from aDNA and modern DNA plink files
+5) Merge
+6) Prune and remove PCA outliers from the FRwgs plink files (eg Mbuti and some Finish samples)
+
+
+```{bash eval=FALSE}
+module load bcftools
+module load plink
+
+# get the positions
+mkdir /sandbox/shares/mages/WGS_PREGO_Finistere_GAZEL/isabel/FR_aDNA_medieval
+bcftools view /sandbox/shares/mages/20200214.calling.adna.isa.merged.bcf -Ov | grep -v "#" | cut -d$'\t' -f1,2 > /sandbox/shares/mages/WGS_PREGO_Finistere_GAZEL/isabel/FR_aDNA_medieval/inters_SNPs_aDNA_FRwgs.Mbuti.MS.PS.txt
+
+#retrieve positions to extract from the merged file
+cat /sandbox/shares/mages/WGS_PREGO_Finistere_GAZEL/isabel/FR_aDNA_medieval/inters_SNPs_aDNA_FRwgs.Mbuti.MS.PS.txt | sed 's/^chr//g' | awk '{OFS=":"; print $1,$2}' >> /sandbox/shares/mages/WGS_PREGO_Finistere_GAZEL/isabel/FR_aDNA_medieval/inters_SNPs_aDNA_FRwgs.Mbuti.MS.PS.bim.txt
+
+#it is easier to convert bcf into plink first
+plink --noweb --memory 5000 --bcf /sandbox/shares/mages/20200214.calling.adna.isa.merged.bcf --allow-extra-chr --make-bed --keep-allele-order --out /sandbox/users/alves-i/FR_WGS/FR_aDNA_medieval/aDNA.calls
+
+#change the resulting .bim file to add SNP id like chrNb:Pos
+cat /sandbox/users/alves-i/FR_WGS/FR_aDNA_medieval/aDNA.calls.bim | awk '{print $1,$1":"$2,$3,$4,$5,$6}' > /sandbox/users/alves-i/FR_WGS/FR_aDNA_medieval/aDNA.calls.new.bim
+
+mv ~/FR_WGS/FR_aDNA_medieval/aDNA.calls.new.bim ~/FR_WGS/FR_aDNA_medieval/aDNA.calls.bim
+
+#try to merge - but there are tri-allelic sites
+plink --noweb --memory 5000 -bfile /sandbox/users/alves-i/FR_WGS/FR_aDNA_medieval/aDNA.calls --bmerge /sandbox/users/alves-i/FR_WGS/plink/plinkFiles/FRwgs_Mbuti.MS_PS.allCHROM.snps.bi.clean --extract /sandbox/users/alves-i/FR_WGS/FR_aDNA_medieval/inters_SNPs_aDNA_FRwgs.Mbuti.MS.PS.bim.txt --keep-allele-order --make-bed --out /sandbox/shares/mages/WGS_PREGO_Finistere_GAZEL/isabel/FR_aDNA_medieval/FRwgs_Mbuti.MS_PS.ancientSAMPLES.allCHROM.snps.bi.clean 
+
+#to remove from the snp list the ones that when merged are tri-allelic
+awk 'NR==FNR{a[$0];next} !($0 in a)' ~/FR_WGS/FR_aDNA_medieval/FRwgs_Mbuti.MS_PS.ancientSAMPLES.allCHROM.snps.bi.clean-merge.missnp ~/FR_WGS/FR_aDNA_medieval/inters_SNPs_aDNA_FRwgs.Mbuti.MS.PS.bim.txt > ~/FR_WGS/FR_aDNA_medieval/inters_SNPs_aDNA_FRwgs.Mbuti.MS.PS.biAllelic.snps
+
+#remove tri-allelic sites from files
+plink --noweb --memory 5000 -bfile /sandbox/users/alves-i/FR_WGS/FR_aDNA_medieval/aDNA.calls --extract ~/FR_WGS/FR_aDNA_medieval/inters_SNPs_aDNA_FRwgs.Mbuti.MS.PS.biAllelic.snps --make-bed --keep-allele-order --out /sandbox/users/alves-i/FR_WGS/FR_aDNA_medieval/aDNA.calls.noTRI
+
+plink --noweb --memory 5000 -bfile /sandbox/users/alves-i/FR_WGS/plink/plinkFiles/FRwgs_Mbuti.MS_PS.allCHROM.snps.bi.clean --extract ~/FR_WGS/FR_aDNA_medieval/inters_SNPs_aDNA_FRwgs.Mbuti.MS.PS.biAllelic.snps --make-bed --keep-allele-order --out /sandbox/users/alves-i/FR_WGS/FR_aDNA_medieval/FRwgs_Mbuti.MS_PS.noTRI
+
+#merging clean datasets.
+plink --noweb --memory 5000 -bfile /sandbox/users/alves-i/FR_WGS/FR_aDNA_medieval/aDNA.calls.noTRI --bmerge /sandbox/users/alves-i/FR_WGS/FR_aDNA_medieval/FRwgs_Mbuti.MS_PS.noTRI --extract /sandbox/users/alves-i/FR_WGS/FR_aDNA_medieval/inters_SNPs_aDNA_FRwgs.Mbuti.MS.PS.biAllelic.snps --keep-allele-order --make-bed --out /sandbox/shares/mages/WGS_PREGO_Finistere_GAZEL/isabel/FR_aDNA_medieval/FRwgs_Mbuti.MS_PS.ancientSAMPLES.allCHROM.snps.bi.clean 
+
+# get the list of individuals removed in the PCA
+more logFile.log | grep REMOVED | while read line; do echo $line | cut -d$' ' -f3 >> ~/FR_WGS/plink/pca/FRwgs_Mbu_MS_PS/outliers.inds; done
+
+#prune
+mkdir /sandbox/shares/mages/WGS_PREGO_Finistere_GAZEL/isabel/FR_aDNA_medieval/LD_pruning
+plink --noweb --memory 5000 -bfile /sandbox/shares/mages/WGS_PREGO_Finistere_GAZEL/isabel/FR_aDNA_medieval/FRwgs_Mbuti.MS_PS.ancientSAMPLES.allCHROM.snps.bi.clean  --indep-pairwise 50 5 0.5 --out /sandbox/shares/mages/WGS_PREGO_Finistere_GAZEL/isabel/FR_aDNA_medieval/LD_pruning/PCA.ready
+
+cat ~/FR_WGS/plink/pca/FRwgs_Mbu_MS_PS/outliers.inds | while read indID; do grep $indID /sandbox/users/alves-i/FR_WGS/FR_aDNA_medieval/FRwgs_Mbuti.MS_PS.ancientSAMPLES.allCHROM.snps.bi.clean.fam | cut -d$' ' -f1,2 >> /sandbox/users/alves-i/FR_WGS/FR_aDNA_medieval/outliers_withFamID.inds; done
+
+plink --noweb --memory 5000 -bfile /sandbox/shares/mages/WGS_PREGO_Finistere_GAZEL/isabel/FR_aDNA_medieval/FRwgs_Mbuti.MS_PS.ancientSAMPLES.allCHROM.snps.bi.clean --extract /sandbox/shares/mages/WGS_PREGO_Finistere_GAZEL/isabel/FR_aDNA_medieval/LD_pruning/PCA.ready.prune.in --remove ~/sandbox/users/alves-i/FR_WGS/FR_aDNA_medieval/outliers_withFamID.inds --keep-allele-order --make-bed --out /sandbox/shares/mages/WGS_PREGO_Finistere_GAZEL/isabel/FR_aDNA_medieval/FRwgs.MS_PS.ancientSAMPLES.pruned.PCAready
+
+#check individuals with 100% missing data
+plink --noweb --memory 5000 -bfile /sandbox/shares/mages/WGS_PREGO_Finistere_GAZEL/isabel/FR_aDNA_medieval/FRwgs.MS_PS.ancientSAMPLES.pruned.PCAready --missing --out /sandbox/shares/mages/WGS_PREGO_Finistere_GAZEL/isabel/FR_aDNA_medieval/FRwgs.MS_PS.ancientSAMPLES.pruned.PCAready.missing_stats
+```
+
+To run smartPCA and retrieve an output with pop labels one needs to change .fam file
+
+```{bash eval=FALSE}
+
+COUNT_SAMPLES=0;cat /sandbox/shares/mages/WGS_PREGO_Finistere_GAZEL/isabel/FR_aDNA_medieval/FRwgs.MS_PS.ancientSAMPLES.pruned.PCAready.fam | while read indLine; do ((COUNT_SAMPLES++)); echo $COUNT_SAMPLES >> /sandbox/shares/mages/WGS_PREGO_Finistere_GAZEL/isabel/FR_aDNA_medieval/famID.fam; echo "1" >> /sandbox/shares/mages/WGS_PREGO_Finistere_GAZEL/isabel/FR_aDNA_medieval/col.6.txt; done
+
+paste -d$' ' <(cat /sandbox/shares/mages/WGS_PREGO_Finistere_GAZEL/isabel/FR_aDNA_medieval/famID.fam) <(cat /sandbox/shares/mages/WGS_PREGO_Finistere_GAZEL/isabel/FR_aDNA_medieval/FRwgs.MS_PS.ancientSAMPLES.pruned.PCAready.fam | awk '{print $2,$3,$4,$5}') <(cat /sandbox/shares/mages/WGS_PREGO_Finistere_GAZEL/isabel/FR_aDNA_medieval/col.6.txt) > /sandbox/shares/mages/WGS_PREGO_Finistere_GAZEL/isabel/FR_aDNA_medieval/FRwgs.MS_PS.ancientSAMPLES.pruned.PCAready.new.fam
+
+(
+echo "genotypename:    /sandbox/shares/mages/WGS_PREGO_Finistere_GAZEL/isabel/FR_aDNA_medieval/FRwgs.MS_PS.ancientSAMPLES.pruned.PCAready.bed"   
+echo "snpname:         /sandbox/shares/mages/WGS_PREGO_Finistere_GAZEL/isabel/FR_aDNA_medieval/FRwgs.MS_PS.ancientSAMPLES.pruned.PCAready.bim"
+echo "indivname:       /sandbox/shares/mages/WGS_PREGO_Finistere_GAZEL/isabel/FR_aDNA_medieval/FRwgs.MS_PS.ancientSAMPLES.pruned.PCAready.new.fam"
+echo "outputformat:    EIGENSTRAT"
+echo "genotypeoutname: /sandbox/shares/mages/WGS_PREGO_Finistere_GAZEL/isabel/FR_aDNA_medieval/FRwgs.MS_PS.ancientSAMPLES.pruned.PCAready.geno"
+echo "snpoutname:      /sandbox/shares/mages/WGS_PREGO_Finistere_GAZEL/isabel/FR_aDNA_medieval/FRwgs.MS_PS.ancientSAMPLES.pruned.PCAready.snp"
+echo "indivoutname:    /sandbox/shares/mages/WGS_PREGO_Finistere_GAZEL/isabel/FR_aDNA_medieval/FRwgs.MS_PS.ancientSAMPLES.pruned.PCAready.ind"
+echo "familynames:     NO"
+) > /sandbox/shares/mages/WGS_PREGO_Finistere_GAZEL/isabel/FR_aDNA_medieval/convert.input
+
+EIG-6.1.4/bin/convertf -p /sandbox/shares/mages/WGS_PREGO_Finistere_GAZEL/isabel/FR_aDNA_medieval/convert.input > /sandbox/shares/mages/WGS_PREGO_Finistere_GAZEL/isabel/FR_aDNA_medieval/convert.log
+
+cat /sandbox/shares/mages/WGS_PREGO_Finistere_GAZEL/isabel/FR_aDNA_medieval/FRwgs.MS_PS.ancientSAMPLES.pruned.PCAready.ind | awk '{print $1}' | while read indID; do if [[ "$indID" =~ ^fra ]]; then echo "Processing ancient DNA samples"; echo "Middle_Ages_FR" >> /sandbox/shares/mages/WGS_PREGO_Finistere_GAZEL/isabel/FR_aDNA_medieval/pop.fam; else grep $indID ~/FR_WGS/plink/plinkFiles/FRwgs_Mbuti.MS_PS.allCHROM.snps.bi.clean.pruned.ind | cut -d$' ' -f3 >> /sandbox/shares/mages/WGS_PREGO_Finistere_GAZEL/isabel/FR_aDNA_medieval/pop.fam; fi; done
+
+paste -d' ' <(cat /sandbox/shares/mages/WGS_PREGO_Finistere_GAZEL/isabel/FR_aDNA_medieval/FRwgs.MS_PS.ancientSAMPLES.pruned.PCAready.ind | awk '{print $1}') <(cat /sandbox/shares/mages/WGS_PREGO_Finistere_GAZEL/isabel/FR_aDNA_medieval/FRwgs.MS_PS.ancientSAMPLES.pruned.PCAready.ind | awk '{print $2}') <(cat /sandbox/shares/mages/WGS_PREGO_Finistere_GAZEL/isabel/FR_aDNA_medieval/pop.fam) > /sandbox/shares/mages/WGS_PREGO_Finistere_GAZEL/isabel/FR_aDNA_medieval/FRwgs.MS_PS.ancientSAMPLES.pruned.PCAready.new.ind
+
+mkdir /sandbox/shares/mages/WGS_PREGO_Finistere_GAZEL/isabel/FR_aDNA_medieval/pca
+
+cat /sandbox/shares/mages/WGS_PREGO_Finistere_GAZEL/isabel/FR_aDNA_medieval/pop.fam | sort | uniq -c | awk '{print $2}' | grep -v "Middle_age_FR" > /sandbox/shares/mages/WGS_PREGO_Finistere_GAZEL/isabel/FR_aDNA_medieval/pca/popList.smartPCA.txt
+
+
+
+(
+echo "genotypename:  /sandbox/shares/mages/WGS_PREGO_Finistere_GAZEL/isabel/FR_aDNA_medieval/FRwgs.MS_PS.ancientSAMPLES.pruned.PCAready.geno"
+echo "snpname:       /sandbox/shares/mages/WGS_PREGO_Finistere_GAZEL/isabel/FR_aDNA_medieval/FRwgs.MS_PS.ancientSAMPLES.pruned.PCAready.snp"
+echo "indivname:     /sandbox/shares/mages/WGS_PREGO_Finistere_GAZEL/isabel/FR_aDNA_medieval/FRwgs.MS_PS.ancientSAMPLES.pruned.PCAready.new.ind"
+echo "evecoutname:   /sandbox/shares/mages/WGS_PREGO_Finistere_GAZEL/isabel/FR_aDNA_medieval/pca/WGS.evec"
+echo "evaloutname:   /sandbox/shares/mages/WGS_PREGO_Finistere_GAZEL/isabel/FR_aDNA_medieval/pca/WGS.eval"
+echo "deletesnpoutname: EIG_removed_SNPs"
+echo "numoutevec: 10"
+echo "fsthiprecision: YES"
+echo "outlieroutname: /sandbox/shares/mages/WGS_PREGO_Finistere_GAZEL/isabel/FR_aDNA_medieval/pca/outliers.out" 
+echo "poplistname:    /sandbox/shares/mages/WGS_PREGO_Finistere_GAZEL/isabel/FR_aDNA_medieval/pca/popList.smartPCA.txt"
+echo "lsqproject:  YES"
+
+) > /sandbox/shares/mages/WGS_PREGO_Finistere_GAZEL/isabel/FR_aDNA_medieval/pca/smartPCA.par
+
+EIG-6.1.4/bin/smartpca -p /sandbox/shares/mages/WGS_PREGO_Finistere_GAZEL/isabel/FR_aDNA_medieval/pca/smartPCA.par > /sandbox/shares/mages/WGS_PREGO_Finistere_GAZEL/isabel/FR_aDNA_medieval/pca/logFile.log
+
+```
+
+
